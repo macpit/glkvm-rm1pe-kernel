@@ -1,6 +1,39 @@
 # Recovery
 
-Three ways back, in order of how much has gone wrong.
+Ways back, in order of how much has gone wrong. **Most of them do not need a
+serial console**, which is worth knowing before you start.
+
+## 0. The vendor's own failsafe: U-Boot web UI
+
+GL.iNet ships a U-Boot web recovery on this hardware, and it is the first thing
+to reach for if the device no longer boots. It restores stock firmware, so it
+undoes everything in this repository -- which is exactly what you want when you
+are trying to get a working device back.
+
+For the **GL-RM1PE**, from
+[GL's own documentation](https://docs.gl-inet.com/kvm/en/faq/debrick/):
+
+1. Download the stock firmware from <https://dl.gl-inet.com/kvm>.
+2. Power the KVM off. Connect it directly to your computer's Ethernet port.
+3. **Hold the Reset button and power the device on at the same time.** The blue
+   LED flashes five times; release Reset after that, and the LED goes solid.
+4. Set your computer's Ethernet interface to `192.168.1.2` / `255.255.255.0`.
+5. Open `http://192.168.1.1` -- that is the U-Boot web UI. Choose the firmware
+   file and click Update. It takes about three minutes; do not cut the power.
+
+This is a genuine escape hatch: the recovery lives in U-Boot, so it works even
+when the boot partition is unusable. Confirmed present in the U-Boot on this
+device -- the upload page and the `httpd` command (`start web server for
+firmware recovery`) are both in the binary, alongside `tftp`, `dhcp` and
+`rockusb`. **We have not yet had to use it in anger**, so if you do, please say
+how it went in an issue.
+
+GL documents two further routes that also need no serial console:
+[RKDevTool](https://docs.gl-inet.com/kvm/en/tutorials/how_to_debrick_kvm_via_rkdevtool/)
+and [USB OTG](https://docs.gl-inet.com/kvm/en/tutorials/how_to_unbrick_kvm_via_usb_otg/).
+
+Note that all three restore the stock image. If you only want your previous
+kernel back and the device still gives you a shell, use option 1 instead.
 
 ## 1. The device still boots: revert over SSH
 
@@ -14,10 +47,11 @@ scripts/revert-kernel.sh <device-ip> <backup-file>      # restore one
 to go back to. Keep a copy of the untouched vendor image there as well; it is
 the one that always works.
 
-## 2. The device does not boot: U-Boot over the serial console
+## 2. The device does not boot, and you want your own image back
 
-This has been used many times and it works. You need the serial console
-(below).
+This puts a specific image back rather than restoring stock, so it is what you
+want if option 0 would throw away more than you like. It has been used many
+times here and it works, but it needs the serial console (below).
 
 Interrupt the boot at `Hit key to stop autoboot` with Ctrl-C, then:
 

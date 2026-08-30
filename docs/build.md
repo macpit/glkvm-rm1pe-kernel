@@ -1,5 +1,34 @@
 # Building
 
+> ## The one thing that can damage hardware
+>
+> **A kernel without the `version` sysfs attribute on the LT6911C reflashes the
+> chip's firmware in a loop.** `/etc/init.d/S23hdmi` reads
+> `/sys/bus/i2c/devices/1-002b/version` at every boot, and on a mismatch runs
+> `lt6911c_upgrade -f v3.bin`, which erases and rewrites the SPI flash inside
+> the HDMI bridge and then reboots. Miss the attribute and that repeats on
+> every boot -- erasing and rewriting the chip each time round.
+>
+> This is not theoretical. It happened here, four full cycles, because a patch
+> was reverted without noticing that it carried the attribute.
+>
+> Patch `0004` implements it. Do not drop it, and do not build a partial
+> driver. If you are flashing a kernel whose attribute you have not confirmed,
+> move `/etc/init.d/S23hdmi` aside first (`mv S23hdmi S23hdmi.disabled`) --
+> `/` is a writable overlay, so it survives the reboot -- and put it back once
+> `cat /sys/bus/i2c/devices/1-002b/version` reads `49.25.3.3.1`.
+>
+> On the serial console the symptom is `>>> erase flash over` or
+> `write firmware 286`. Pull the power immediately.
+>
+> None of this applies if you install the prebuilt release with `install.sh`:
+> that kernel has the attribute, and the installer checks the device before it
+> writes.
+
+Attach a serial console before your first self-built flash. Without it you
+cannot tell a rejected FIT from a kernel panic from a kernel that never
+loaded. See [recovery.md](recovery.md).
+
 ## Why 6.1.141 and not 6.1.118
 
 The published tree is 6.1.118. The device ships 6.1.141, and the six vendor

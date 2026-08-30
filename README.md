@@ -8,35 +8,38 @@ Everything here is built from public sources: GL.iNet's
 [kernel-6.1](https://github.com/gl-inet/kernel-6.1), the upstream stable
 patches, and the changes in `patches/`. No vendor binaries are redistributed.
 
-> ### Read this before you flash anything
+> ### Before you start
 >
-> **A kernel without the `version` sysfs attribute on the LT6911C will reflash
-> the chip's firmware in a loop.** `/etc/init.d/S23hdmi` reads
-> `/sys/bus/i2c/devices/1-002b/version` at every boot and, on a mismatch, runs
-> `lt6911c_upgrade -f v3.bin`, which erases and rewrites the SPI flash inside
-> the HDMI bridge, then reboots. Miss that attribute and the cycle repeats on
-> every boot. Patch `0004` implements it. Do not drop it, and do not build a
-> partial driver.
+> Follow the instructions as written. If you skip steps or improvise, you will
+> be recovering the device rather than using it.
 >
-> If you see `>>> erase flash over` or `write firmware 286` on the serial
-> console, pull the power immediately.
->
-> A serial console is strongly recommended for the first flash. See
+> The good news is that GL.iNet ship a U-Boot web failsafe on this hardware:
+> hold Reset while powering on, set your PC to 192.168.1.2, and flash stock
+> firmware from `http://192.168.1.1`. That works even when the boot partition
+> does not, and it needs no serial console. See
 > [docs/recovery.md](docs/recovery.md).
+>
+> Installing the prebuilt kernel is the safe route: it checks your device and
+> firmware, backs the boot partition up and verifies everything it writes.
+> **Building your own kernel has one hazard that can damage the HDMI bridge**
+> -- read [docs/build.md](docs/build.md) first, all of it.
 
 ### Status
 
-First release. It works on the two devices I have and has never touched anyone
+First release. It works on the device I have and has never touched anyone
 else's hardware.
 
-You need to be comfortable with a cross-compiled kernel build and with reading
-a boot log. The install and revert scripts only help while the device still
-boots far enough for SSH. After that you need a serial console, and on the
-RM1PE that means opening the case and soldering to the RX pad, since it is not
-broken out. Get a cable before you start if you do not have one.
+The install and revert paths run on the KVM itself and need nothing else. The
+build route needs a cross toolchain and someone comfortable reading a boot log.
+Either way, both only help while the device still boots far enough for a shell.
+After that, GL's U-Boot web failsafe gets you back to stock firmware without
+opening anything. A serial console is only needed to put a *specific* image
+back instead of stock -- useful if you are developing, not something a user
+needs.
 
-Everything else is reversible. `install-kernel.sh` backs up the boot partition
-before it writes, `revert-kernel.sh` puts it back.
+Everything short of that is reversible: the boot partition is backed up and
+verified before anything is written, and put back if the write does not
+verify.
 
 ## What works
 
