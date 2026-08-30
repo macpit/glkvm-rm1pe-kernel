@@ -9,9 +9,10 @@ what gets it back. Do not start on the assumption that something easier will.
 >
 > GL.iNet document a U-Boot web failsafe at `192.168.1.1` -- hold Reset while
 > powering on, wait for the blue LED to flash five times, release. It has never
-> worked on this device. When one was actually left unbootable, the LED did not
-> come on at all, so there was no signal to act on and no way to tell whether
-> the mode had been entered. Recovery meant a serial console.
+> worked on this device. When one was actually left unbootable, every documented
+> reset combination was tried and none of them did anything -- and the LED did
+> not come on at all, so there was no signal to act on and no way to tell
+> whether any mode had been entered. Recovery meant a serial console.
 >
 > Two things on this board explain it:
 >

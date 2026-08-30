@@ -32,8 +32,9 @@ The install and revert paths run on the KVM itself and need nothing else. The
 build route needs a cross toolchain and someone comfortable reading a boot log.
 Either way, both only help while the device still boots far enough for a shell.
 After that you are into recovery, and the honest answer is that the vendor's
-failsafe routes are worth trying but have not worked here when it mattered. Get
-a serial cable before you start if you do not have one -- on the RM1PE that
+failsafe routes did not work here at all -- every documented reset combination
+was tried on a device that would not boot, and none of them brought it back.
+Get a serial cable before you start if you do not have one. On the RM1PE that
 also means opening the case and soldering to the RX pad, which is not broken
 out.
 
