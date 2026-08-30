@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>KVM</title>
+<style>
+  :root {
+    --ink:        #0a1020;
+    --panel:      #121c33;
+    --panel-edge: #22304f;
+    --text:       #e9edf7;
+    --text-dim:   #8595b8;
+    --accent:     #4b63e8;
+    --accent-hi:  #6076f0;
+    --signal:     #4ad3a8;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+
+  body {
+    margin: 0;
+    padding: 20px 16px 28px;
+    background: var(--ink);
+    background-image:
+      radial-gradient(circle at 20% 0%, rgba(75,99,232,.22), transparent 55%),
+      radial-gradient(circle at 90% 100%, rgba(74,211,168,.08), transparent 50%);
+    color: var(--text);
+    font-family: var(--sans);
+    -webkit-font-smoothing: antialiased;
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+  }
+
+  .panel {
+    width: 100%;
+    max-width: 460px;
+    background: var(--panel);
+    border: 1px solid var(--panel-edge);
+    border-radius: 12px;
+    padding: 26px 24px 22px;
+    box-shadow: 0 20px 44px rgba(0,0,0,.4);
+  }
+
+  .eyebrow {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    margin: 0 0 18px;
+  }
+
+  .led {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--signal);
+    box-shadow: 0 0 8px rgba(74,211,168,.85);
+    flex: none;
+    animation: pulse 2.6s ease-in-out infinite;
+  }
+  @keyframes pulse { 50% { opacity: .35; } }
+
+  h1 { margin: 0 0 6px; font-size: 25px; font-weight: 600; letter-spacing: -.01em; }
+
+  .lede { margin: 0 0 22px; font-size: 14.5px; line-height: 1.5; color: var(--text-dim); }
+
+  .addr-block {
+    border-top: 1px solid var(--panel-edge);
+    border-bottom: 1px solid var(--panel-edge);
+    padding: 16px 0 15px;
+    margin-bottom: 20px;
+  }
+
+  .addr-label {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: .18em;
+    text-transform: uppercase;
+    color: var(--accent-hi);
+    margin-bottom: 7px;
+  }
+
+  .addr {
+    font-family: var(--mono);
+    font-size: clamp(24px, 8vw, 31px);
+    font-weight: 600;
+    color: var(--text);
+    word-break: break-all;
+    line-height: 1.15;
+  }
+
+  .actions { display: flex; flex-direction: column; gap: 10px; }
+
+  .btn {
+    display: block;
+    width: 100%;
+    padding: 13px 16px;
+    border-radius: 8px;
+    border: 1px solid transparent;
+    font-family: var(--sans);
+    font-size: 15px;
+    font-weight: 550;
+    text-align: center;
+    text-decoration: none;
+    cursor: pointer;
+    transition: background-color .15s ease, border-color .15s ease;
+  }
+
+  .btn-primary { background: var(--accent); color: #fff; }
+  .btn-primary:hover { background: var(--accent-hi); }
+
+  .btn-ghost { background: transparent; border-color: var(--panel-edge); color: var(--text); }
+  .btn-ghost:hover { border-color: #35486f; }
+
+  .btn:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
+
+  .fallback {
+    margin-top: 18px;
+    padding: 14px 16px;
+    background: rgba(75,99,232,.09);
+    border: 1px solid rgba(75,99,232,.28);
+    border-radius: 8px;
+  }
+
+  .fallback-title { font-size: 13px; font-weight: 600; margin: 0 0 8px; color: var(--text); }
+
+  .steps { margin: 0; padding: 0; list-style: none; font-size: 13.5px; line-height: 1.55; color: var(--text-dim); }
+  .steps li { display: flex; gap: 10px; padding: 3px 0; }
+  .steps .n { font-family: var(--mono); font-size: 11px; color: var(--accent-hi); padding-top: 3px; flex: none; }
+
+  .hint { margin: 16px 0 0; font-size: 12.5px; line-height: 1.5; color: rgba(233,237,247,.42); }
+
+  .meta {
+    margin-top: 20px;
+    padding-top: 14px;
+    border-top: 1px solid var(--panel-edge);
+    font-family: var(--mono);
+    font-size: 11px;
+    line-height: 1.9;
+    letter-spacing: .04em;
+    color: var(--text-dim);
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 0 14px;
+  }
+  .meta dt { color: rgba(233,237,247,.4); }
+  .meta dd { margin: 0; }
+
+  [hidden] { display: none !important; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .led { animation: none; }
+    .btn { transition: none; }
+  }
+</style>
+</head>
+<body>
+  <main class="panel">
+    <p class="eyebrow"><span class="led" aria-hidden="true"></span>KVM &middot; connected</p>
+
+    <h1 id="head">Connected.</h1>
+    <p class="lede" id="lede">This is the system's login window and it cannot be resized. Open the console in a browser.</p>
+
+    <div class="addr-block">
+      <div class="addr-label">Address</div>
+      <div class="addr" id="addr">192.192.193.1</div>
+    </div>
+
+    <div class="actions">
+      <button class="btn btn-primary" id="release" type="button">Copy address and close this window</button>
+      <button class="btn btn-ghost" id="copy" type="button">Copy address</button>
+    </div>
+
+    <div class="fallback" id="fallback" hidden>
+      <p class="fallback-title">You can close this window now</p>
+      <ol class="steps">
+        <li><span class="n">01</span><span>Hit Cancel, top right. The Wi-Fi stays connected.</span></li>
+        <li><span class="n">02</span><span>Open a browser and paste the address.</span></li>
+      </ol>
+    </div>
+
+    <p class="hint">This network only leads to the KVM, not to the internet. On a phone, everything else keeps using mobile data.</p>
+
+    <dl class="meta">
+      <dt>SSID</dt><dd id="ssid">my-kvm</dd>
+      <dt>Gateway</dt><dd>192.192.193.1</dd>
+      <dt>Console</dt><dd>HTTP, encrypted by WPA2 on the air</dd>
+    </dl>
+  </main>
+
+<script>
+(function () {
+  var ADDR = "192.192.193.1";
+  var KVM  = "http://" + ADDR + "/";
+
+  // The state service marks its redirect with ?cna=1. That is the only
+  // reliable way to tell the captive window from a normal browser: the system
+  // prober sends CaptiveNetworkSupport, but the web view inside the very same
+  // window sends an ordinary Safari user agent.
+  var inAssistant = /[?&]cna=1/.test(location.search) ||
+                    /CaptiveNetworkSupport/i.test(navigator.userAgent);
+
+  var release  = document.getElementById("release");
+  var fallback = document.getElementById("fallback");
+
+  if (!inAssistant) {
+    release.textContent = "Open the console";
+    document.getElementById("lede").textContent = "The console is reachable.";
+    release.addEventListener("click", function () { location.href = KVM; });
+  } else {
+    // Releasing keeps this window from appearing on the next join. It cannot
+    // close itself: macOS accepts neither the release nor a navigation to the
+    // success page as a completed login. So say so instead.
+    release.addEventListener("click", function () {
+      copyAddr(function (ok) {
+        try { fetch("/captive/done", { cache: "no-store" }); } catch (e) {}
+        document.getElementById("head").textContent = "Done.";
+        document.getElementById("lede").textContent = ok
+          ? "The address is on your clipboard."
+          : "Copying failed, note the address down.";
+        document.querySelector(".actions").hidden = true;
+        fallback.hidden = false;
+      });
+    });
+  }
+
+  function copyAddr(cb) {
+    var fin = function (ok) { if (cb) cb(ok); };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(ADDR).then(function () { fin(true); },
+                                              function () { fin(selectAddr()); });
+    } else {
+      fin(selectAddr());
+    }
+  }
+
+  function selectAddr() {
+    var r = document.createRange();
+    r.selectNodeContents(document.getElementById("addr"));
+    var sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(r);
+    try { return document.execCommand("copy"); } catch (e) { return false; }
+  }
+
+  document.getElementById("copy").addEventListener("click", function () {
+    var btn = this;
+    copyAddr(function (ok) {
+      btn.textContent = ok ? "Copied" : "Copying failed";
+      setTimeout(function () { btn.textContent = "Copy address"; }, 2200);
+    });
+  });
+})();
+</script>
+</body>
+</html>

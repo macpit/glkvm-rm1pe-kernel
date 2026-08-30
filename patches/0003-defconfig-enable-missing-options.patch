@@ -1,0 +1,23 @@
+diff --git a/arch/arm64/configs/rv1126bp_gl_rm1_poe_defconfig b/arch/arm64/configs/rv1126bp_gl_rm1_poe_defconfig
+index f11d9174f..0269224d5 100644
+--- a/arch/arm64/configs/rv1126bp_gl_rm1_poe_defconfig
++++ b/arch/arm64/configs/rv1126bp_gl_rm1_poe_defconfig
+@@ -421,3 +421,18 @@ CONFIG_BOOTPARAM_RCU_STALL_PANIC=y
+ # CONFIG_FTRACE is not set
+ # CONFIG_STRICT_DEVMEM is not set
+ # CONFIG_RUNTIME_TESTING_MENU is not set
++CONFIG_ROCKCHIP_DVBM=y
++CONFIG_HWSPINLOCK=y
++CONFIG_HWSPINLOCK_ROCKCHIP=y
++CONFIG_VIDEO_LT6911C=y
++CONFIG_WIRELESS=y
++CONFIG_CFG80211=y
++CONFIG_CFG80211_WEXT=y
++CONFIG_MAC80211=y
++CONFIG_WLAN=y
++CONFIG_WLAN_VENDOR_ATH=y
++CONFIG_ATH9K_HTC=y
++CONFIG_WLAN_VENDOR_MEDIATEK=y
++CONFIG_MT7601U=y
++CONFIG_STAGING=y
++CONFIG_R8188EU=y

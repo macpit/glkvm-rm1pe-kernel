@@ -1,0 +1,180 @@
+diff --git a/drivers/gpu/drm/panel/panel-simple.c b/drivers/gpu/drm/panel/panel-simple.c
+index 33a0c1f80..d2b077d17 100644
+--- a/drivers/gpu/drm/panel/panel-simple.c
++++ b/drivers/gpu/drm/panel/panel-simple.c
+@@ -4672,6 +4672,9 @@ static const struct of_device_id platform_of_match[] = {
+ 		.compatible = "yes-optoelectronics,ytc700tlag-05-201c",
+ 		.data = &yes_optoelectronics_ytc700tlag_05_201c,
+ #endif /* !CONFIG_DRM_PANEL_SIMPLE_OF_ONLY */
++	}, {
++		.compatible = "microchip,ac69t88a",
++		.data = &mchp_ac69t88a,
+ 	}, {
+ 		/* Must be the last entry */
+ 		.compatible = "panel-dpi",
+diff --git a/drivers/iio/adc/rockchip_saradc.c b/drivers/iio/adc/rockchip_saradc.c
+index 57e2f3b08..22766d566 100644
+--- a/drivers/iio/adc/rockchip_saradc.c
++++ b/drivers/iio/adc/rockchip_saradc.c
+@@ -607,6 +607,8 @@ static irqreturn_t rockchip_saradc_trigger_handler(int irq, void *p)
+ 	int ret;
+ 	int i, j = 0;
+ 
++	memset(&data, 0, sizeof(data));
++
+ 	mutex_lock(&info->lock);
+ 
+ 	for_each_set_bit(i, i_dev->active_scan_mask, i_dev->masklength) {
+diff --git a/drivers/tty/serial/8250/8250.h b/drivers/tty/serial/8250/8250.h
+index b90a784c9..983391f50 100644
+--- a/drivers/tty/serial/8250/8250.h
++++ b/drivers/tty/serial/8250/8250.h
+@@ -353,6 +353,7 @@ static inline int is_omap1510_8250(struct uart_8250_port *pt)
+ 
+ #ifdef CONFIG_SERIAL_8250_DMA
+ extern int serial8250_tx_dma(struct uart_8250_port *);
++extern void serial8250_tx_dma_flush(struct uart_8250_port *);
+ extern int serial8250_rx_dma(struct uart_8250_port *);
+ #if defined(CONFIG_ARCH_ROCKCHIP) && defined(CONFIG_NO_GKI)
+ extern int serial8250_start_rx_dma(struct uart_8250_port *);
+diff --git a/drivers/tty/serial/8250/8250_dma.c b/drivers/tty/serial/8250/8250_dma.c
+index c3816168a..739a42bca 100644
+--- a/drivers/tty/serial/8250/8250_dma.c
++++ b/drivers/tty/serial/8250/8250_dma.c
+@@ -185,6 +185,22 @@ int serial8250_tx_dma(struct uart_8250_port *p)
+ 	return ret;
+ }
+ 
++void serial8250_tx_dma_flush(struct uart_8250_port *p)
++{
++	struct uart_8250_dma *dma = p->dma;
++
++	if (!dma->tx_running)
++		return;
++
++	/*
++	 * kfifo_reset() has been called by the serial core, avoid
++	 * advancing and underflowing in __dma_tx_complete().
++	 */
++	dma->tx_size = 0;
++
++	dmaengine_terminate_async(dma->txchan);
++}
++
+ #if defined(CONFIG_ARCH_ROCKCHIP) && defined(CONFIG_NO_GKI)
+ 
+ int serial8250_rx_dma(struct uart_8250_port *p)
+diff --git a/drivers/tty/serial/8250/8250_dw.c b/drivers/tty/serial/8250/8250_dw.c
+index d55eba293..dd019fe86 100644
+--- a/drivers/tty/serial/8250/8250_dw.c
++++ b/drivers/tty/serial/8250/8250_dw.c
+@@ -872,7 +872,8 @@ static const struct of_device_id dw8250_of_match[] = {
+ 	{ .compatible = "cavium,octeon-3860-uart", .data = &dw8250_octeon_3860_data },
+ 	{ .compatible = "marvell,armada-38x-uart", .data = &dw8250_armada_38x_data },
+ 	{ .compatible = "renesas,rzn1-uart", .data = &dw8250_renesas_rzn1_data },
+-	{ .compatible = "starfive,jh7100-uart", .data = &dw8250_starfive_jh7100_data },
++	{ .compatible = "sophgo,sg2044-uart", .data = &dw8250_skip_set_rate_data },
++	{ .compatible = "starfive,jh7100-uart", .data = &dw8250_skip_set_rate_data },
+ #endif
+ 	{ /* Sentinel */ }
+ };
+diff --git a/drivers/usb/core/quirks.c b/drivers/usb/core/quirks.c
+index 586453a4b..9c968f49c 100644
+--- a/drivers/usb/core/quirks.c
++++ b/drivers/usb/core/quirks.c
+@@ -557,6 +557,9 @@ static const struct usb_device_id usb_quirk_list[] = {
+ 	/* Lexar Flash */
+ 	{ USB_DEVICE(0x21c4, 0x0cd1), .driver_info = USB_QUIRK_NO_LPM },
+ 
++	/* VLI disk */
++	{ USB_DEVICE(0x2109, 0x0711), .driver_info = USB_QUIRK_NO_LPM },
++
+ 	/* Raydium Touchscreen */
+ 	{ USB_DEVICE(0x2386, 0x3114), .driver_info = USB_QUIRK_NO_LPM },
+ 
+diff --git a/drivers/usb/dwc2/hcd.c b/drivers/usb/dwc2/hcd.c
+index 16e61c39b..a36002b67 100644
+--- a/drivers/usb/dwc2/hcd.c
++++ b/drivers/usb/dwc2/hcd.c
+@@ -4452,6 +4452,7 @@ static int _dwc2_hcd_resume(struct usb_hcd *hcd)
+ 		 * Power Down mode.
+ 		 */
+ 		if (hprt0 & HPRT0_CONNSTS) {
++			set_bit(HCD_FLAG_HW_ACCESSIBLE, &hcd->flags);
+ 			hsotg->lx_state = DWC2_L0;
+ 			goto unlock;
+ 		}
+diff --git a/drivers/usb/dwc3/core.c b/drivers/usb/dwc3/core.c
+index 3a125b40c..62bbc69d2 100644
+--- a/drivers/usb/dwc3/core.c
++++ b/drivers/usb/dwc3/core.c
+@@ -885,6 +885,25 @@ static int dwc3_clk_enable(struct dwc3 *dwc)
+ 	if (ret)
+ 		goto disable_utmi_clk;
+ 
++	/*
++	 * Above DWC_usb3.0 1.94a, it is recommended to set
++	 * DWC3_GUSB3PIPECTL_SUSPHY and DWC3_GUSB2PHYCFG_SUSPHY to 0 during
++	 * coreConsultant configuration. So default value will be 0 when the
++	 * core is reset. Application needs to set it to 1 after the core
++	 * initialization is completed.
++	 *
++	 * Certain phy requires to be in P0 power state during initialization.
++	 * Make sure GUSB3PIPECTL.SUSPENDENABLE and GUSB2PHYCFG.SUSPHY are clear
++	 * prior to phy init to maintain in the P0 state.
++	 *
++	 * After phy initialization, some phy operations can only be executed
++	 * while in lower P states. Ensure GUSB3PIPECTL.SUSPENDENABLE and
++	 * GUSB2PHYCFG.SUSPHY are set soon after initialization to avoid
++	 * blocking phy ops.
++	 */
++	if (!DWC3_VER_IS_WITHIN(DWC3, ANY, 194A))
++		dwc3_enable_susphy(dwc, true);
++
+ 	return 0;
+ 
+ disable_utmi_clk:
+diff --git a/include/linux/slab.h b/include/linux/slab.h
+index cd2e4dfbf..a4b21f949 100644
+--- a/include/linux/slab.h
++++ b/include/linux/slab.h
+@@ -226,12 +226,18 @@ static inline bool kmem_dump_obj(void *object) { return false; }
+  * alignment larger than the alignment of a 64-bit integer.
+  * Setting ARCH_DMA_MINALIGN in arch headers allows that.
+  */
+-#if defined(ARCH_DMA_MINALIGN) && ARCH_DMA_MINALIGN > 8 && !IS_ENABLED(CONFIG_ROCKCHIP_KMALLOC_NO_USE_ARCH_DMA_MINALIGN)
++#ifdef ARCH_HAS_DMA_MINALIGN
++#if ARCH_DMA_MINALIGN > 8 && !defined(ARCH_KMALLOC_MINALIGN) && \
++    !IS_ENABLED(CONFIG_ROCKCHIP_KMALLOC_NO_USE_ARCH_DMA_MINALIGN)
+ #define ARCH_KMALLOC_MINALIGN ARCH_DMA_MINALIGN
+-#define KMALLOC_MIN_SIZE ARCH_DMA_MINALIGN
+-#define KMALLOC_SHIFT_LOW ilog2(ARCH_DMA_MINALIGN)
+-#else
++#endif
++#endif
++
++#ifndef ARCH_KMALLOC_MINALIGN
+ #define ARCH_KMALLOC_MINALIGN __alignof__(unsigned long long)
++#elif ARCH_KMALLOC_MINALIGN > 8
++#define KMALLOC_MIN_SIZE ARCH_KMALLOC_MINALIGN
++#define KMALLOC_SHIFT_LOW ilog2(KMALLOC_MIN_SIZE)
+ #endif
+ 
+ /*
+diff --git a/scripts/Makefile.lib b/scripts/Makefile.lib
+index f40a08752..c016b57af 100644
+--- a/scripts/Makefile.lib
++++ b/scripts/Makefile.lib
+@@ -472,10 +472,10 @@ quiet_cmd_lzo_with_size = LZO     $@
+       cmd_lzo_with_size = { cat $(real-prereqs) | $(KLZOP) -9; $(size_append); } > $@
+ 
+ quiet_cmd_lz4 = LZ4     $@
+-      cmd_lz4 = cat $(real-prereqs) | $(LZ4) -l -c1 stdin stdout > $@
++      cmd_lz4 = cat $(real-prereqs) | $(LZ4) -l -9 - - > $@
+ 
+ quiet_cmd_lz4_with_size = LZ4     $@
+-      cmd_lz4_with_size = { cat $(real-prereqs) | $(LZ4) -l -c1 stdin stdout; \
++      cmd_lz4_with_size = { cat $(real-prereqs) | $(LZ4) -l -9 - -; \
+                   $(size_append); } > $@
+ 
+ quiet_cmd_lz4c = LZ4C    $@

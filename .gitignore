@@ -1,0 +1,6 @@
+*.img
+*.tar
+*.tgz
+build/
+Image
+.local/

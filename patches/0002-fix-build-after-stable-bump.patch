@@ -1,0 +1,68 @@
+diff --git a/drivers/cpufreq/cpufreq_interactive.c b/drivers/cpufreq/cpufreq_interactive.c
+index 3dba4e99d..6b1839e23 100644
+--- a/drivers/cpufreq/cpufreq_interactive.c
++++ b/drivers/cpufreq/cpufreq_interactive.c
+@@ -300,6 +300,7 @@ static unsigned int choose_freq(struct interactive_cpu *icpu,
+ 		 */
+ 
+ 		index = cpufreq_frequency_table_target(policy, loadadjfreq / tl,
++						       policy->min, policy->max,
+ 						       CPUFREQ_RELATION_L);
+ 
+ 		freq = freq_table[index].frequency;
+@@ -313,7 +314,8 @@ static unsigned int choose_freq(struct interactive_cpu *icpu,
+ 
+ 			/* Find highest frequency that is less than freqmax */
+ 			index = cpufreq_frequency_table_target(policy,
+-					freqmax - 1, CPUFREQ_RELATION_H);
++					freqmax - 1, policy->min, policy->max,
++					CPUFREQ_RELATION_H);
+ 
+ 			freq = freq_table[index].frequency;
+ 
+@@ -335,7 +337,8 @@ static unsigned int choose_freq(struct interactive_cpu *icpu,
+ 
+ 			/* Find lowest frequency that is higher than freqmin */
+ 			index = cpufreq_frequency_table_target(policy,
+-					freqmin + 1, CPUFREQ_RELATION_L);
++					freqmin + 1, policy->min, policy->max,
++					CPUFREQ_RELATION_L);
+ 
+ 			freq = freq_table[index].frequency;
+ 
+@@ -437,6 +440,7 @@ static void eval_target_freq(struct interactive_cpu *icpu)
+ 	icpu->loc_hispeed_val_time = now;
+ 
+ 	index = cpufreq_frequency_table_target(policy, new_freq,
++					       policy->min, policy->max,
+ 					       CPUFREQ_RELATION_L);
+ 	new_freq = freq_table[index].frequency;
+ 
+diff --git a/drivers/usb/dwc3/core.c b/drivers/usb/dwc3/core.c
+index 62bbc69d2..c4a2016ba 100644
+--- a/drivers/usb/dwc3/core.c
++++ b/drivers/usb/dwc3/core.c
+@@ -1975,6 +1975,23 @@ static int dwc3_get_clocks(struct dwc3 *dwc)
+ 	return 0;
+ }
+ 
++static struct power_supply *dwc3_get_usb_power_supply(struct dwc3 *dwc)
++{
++	struct power_supply *usb_psy;
++	const char *usb_psy_name;
++	int ret;
++
++	ret = device_property_read_string(dwc->dev, "usb-psy-name", &usb_psy_name);
++	if (ret < 0)
++		return NULL;
++
++	usb_psy = power_supply_get_by_name(usb_psy_name);
++	if (!usb_psy)
++		return ERR_PTR(-EPROBE_DEFER);
++
++	return usb_psy;
++}
++
+ static int dwc3_probe(struct platform_device *pdev)
+ {
+ 	struct device		*dev = &pdev->dev;

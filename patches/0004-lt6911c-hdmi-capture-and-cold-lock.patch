@@ -1,0 +1,677 @@
+diff --git a/drivers/media/i2c/lt6911c.c b/drivers/media/i2c/lt6911c.c
+index 6b2f33a14..b0d34ead0 100644
+--- a/drivers/media/i2c/lt6911c.c
++++ b/drivers/media/i2c/lt6911c.c
+@@ -19,6 +19,8 @@
+ #include <linux/kernel.h>
+ #include <linux/module.h>
+ #include <linux/of_graph.h>
++#include <linux/regulator/consumer.h>
++#include <linux/pinctrl/consumer.h>
+ #include <linux/rk-camera-module.h>
+ #include <linux/slab.h>
+ #include <linux/timer.h>
+@@ -47,14 +49,30 @@ MODULE_PARM_DESC(debug, "debug level (0-3)");
+ #define LT6911C_PIXEL_RATE	400000000
+ 
+ #define LT6911C_CHIPID	0x0516
++/*
++ * v21: 5 Bytes Chip-Firmware-Version. Registerquelle am laufenden Vendor
++ * verifiziert: 0xD20C..0xD210 = 49 25 03 03 01, Vendor-Formatstring ist
++ * "Firmware Version: %x.%x.%x.%x.%x" (HEXadezimal) -> "49.25.3.3.1".
++ * Preset-unabhaengig geprueft (RG_MK_PRESET_SEL 0x11/0x10 aendern nichts).
++ * /etc/init.d/S23hdmi vergleicht das sysfs-Attribut per String gegen
++ * LT6911C_EXPECTED_VERSION="49.25.3.3.1" und loest bei Abweichung
++ * lt6911c_upgrade -f v3.bin aus: Erase+Write des Chip-SPI-Flash plus
++ * Reboot, bei jedem Boot erneut. Dieses Attribut darf also nie fehlen.
++ */
++#define FW_VERSION_BASE	0xD20C
++#define FW_VERSION_LEN	5
+ #define CHIPID_REGH	0xA001
+ #define CHIPID_REGL	0xA000
+ #define I2C_EN_REG	0x80EE
+ #define I2C_ENABLE	0x1
++/* v18: Freq-Meter jittert ~2 kHz -> Toleranz beim Timing-Vergleich */
++#define LT6911C_PCLK_DELTA	250000
++/* v18: HTOTAL liest 0xFFFF, wenn die Messung nicht bereit ist */
++#define LT6911C_HTOTAL_INVALID	(0xFFFF * 2)
+ #define I2C_DISABLE	0x0
+ 
+ #define AD_HALF_PIX_CLK         0x21
+-#define SOURCE_DP_RX            0x10
++#define SOURCE_DP_RX            0x11 /* Bit0 = Measurement-Enable, Vendor 00.01.04 schreibt 0x11 — ohne Bit0 liest HTOTAL 0xFFFF */
+ #define RECEIVED_INT		1
+ 
+ #define HTOTAL_H		0xd289
+@@ -108,8 +126,12 @@ struct lt6911c_state {
+ 	struct delayed_work delayed_work_res_change;
+ 	struct v4l2_dv_timings timings;
+ 	struct clk *xvclk;
++	struct pinctrl *pinctrl;
+ 	struct gpio_desc *reset_gpio;
++	struct regulator_bulk_data supplies[3];
+ 	struct gpio_desc *plugin_det_gpio;
++	struct gpio_desc *resolution_gpio;
++	u8 fw_version[FW_VERSION_LEN];
+ 	struct gpio_desc *hpd_ctl_gpio;
+ 	struct gpio_desc *power_gpio;
+ 	struct work_struct work_i2c_poll;
+@@ -122,6 +144,7 @@ struct lt6911c_state {
+ 	bool enable_hdcp;
+ 	bool is_audio_present;
+ 	int plugin_irq;
++	int res_irq;
+ 	u32 mbus_fmt_code;
+ 	u8 csi_lanes_in_use;
+ 	u32 module_index;
+@@ -161,6 +184,24 @@ static struct rkmodule_csi_dphy_param rk3588_dcphy_param = {
+ 
+ static const struct lt6911c_mode supported_modes[] = {
+ 	{
++		.width = 3840,
++		.height = 2160,
++		.max_fps = {
++			.numerator = 10000,
++			.denominator = 300000,
++		},
++		.hts_def = 4400,
++		.vts_def = 2250,
++	}, {
++		.width = 2560,
++		.height = 1440,
++		.max_fps = {
++			.numerator = 10000,
++			.denominator = 600000,
++		},
++		.hts_def = 2745,
++		.vts_def = 1460,
++	}, {
+ 		.width = 1920,
+ 		.height = 1080,
+ 		.max_fps = {
+@@ -196,6 +237,96 @@ static const struct lt6911c_mode supported_modes[] = {
+ 		},
+ 		.hts_def = 858,
+ 		.vts_def = 525,
++	}, {
++		.width = 1920,
++		.height = 1280,
++		.max_fps = {
++			.numerator = 10000,
++			.denominator = 600000,
++		},
++		.hts_def = 2080,
++		.vts_def = 1316,
++	}, {
++		.width = 1920,
++		.height = 1200,
++		.max_fps = {
++			.numerator = 10000,
++			.denominator = 600000,
++		},
++		.hts_def = 2080,
++		.vts_def = 1235,
++	}, {
++		.width = 1600,
++		.height = 1200,
++		.max_fps = {
++			.numerator = 10000,
++			.denominator = 600000,
++		},
++		.hts_def = 2160,
++		.vts_def = 1250,
++	}, {
++		.width = 1600,
++		.height = 900,
++		.max_fps = {
++			.numerator = 10000,
++			.denominator = 600000,
++		},
++		.hts_def = 1760,
++		.vts_def = 926,
++	}, {
++		.width = 1440,
++		.height = 900,
++		.max_fps = {
++			.numerator = 10000,
++			.denominator = 600000,
++		},
++		.hts_def = 1904,
++		.vts_def = 934,
++	}, {
++		.width = 1280,
++		.height = 1024,
++		.max_fps = {
++			.numerator = 10000,
++			.denominator = 600000,
++		},
++		.hts_def = 1688,
++		.vts_def = 1066,
++	}, {
++		.width = 1280,
++		.height = 800,
++		.max_fps = {
++			.numerator = 10000,
++			.denominator = 600000,
++		},
++		.hts_def = 1680,
++		.vts_def = 831,
++	}, {
++		.width = 1024,
++		.height = 768,
++		.max_fps = {
++			.numerator = 10000,
++			.denominator = 600000,
++		},
++		.hts_def = 1344,
++		.vts_def = 806,
++	}, {
++		.width = 800,
++		.height = 600,
++		.max_fps = {
++			.numerator = 10000,
++			.denominator = 600000,
++		},
++		.hts_def = 1056,
++		.vts_def = 628,
++	}, {
++		.width = 640,
++		.height = 480,
++		.max_fps = {
++			.numerator = 10000,
++			.denominator = 600000,
++		},
++		.hts_def = 800,
++		.vts_def = 525,
+ 	},
+ };
+ 
+@@ -405,25 +536,36 @@ static inline unsigned int fps_calc(const struct v4l2_bt_timings *t)
+ 			V4L2_DV_BT_FRAME_HEIGHT(t) * V4L2_DV_BT_FRAME_WIDTH(t));
+ }
+ 
++/*
++ * Der ausgelieferte Vendor-Treiber prueft keine Tabelle, sondern eine Regel.
++ * Rekonstruiert aus lt6911c_rcv_supported_res @0xffffffc00854fcb8:
++ *   orr  w6, w1, w2 ; tst x6, #0x3    -> beide Masse durch 4 teilbar
++ *   sub  w2, w1, #0x79 ; cmp w2, #0xf27 -> Breite 121..4000
++ *   sub  w2, w4, #0x79 ; cmp w2, #0xb3f -> Hoehe  121..3000
++ * supported_modes bleibt als Tabelle fuer enum_frame_sizes/-interval und
++ * find_best_fit bestehen, ist aber kein Filter mehr.
++ */
++#define LT6911C_RES_MIN			121
++#define LT6911C_RES_MAX_WIDTH		4000
++#define LT6911C_RES_MAX_HEIGHT		3000
++
+ static bool lt6911c_rcv_supported_res(struct v4l2_subdev *sd, u32 width,
+ 		u32 height)
+ {
+-	u32 i;
+-
+-	for (i = 0; i < ARRAY_SIZE(supported_modes); i++) {
+-		if ((supported_modes[i].width == width) &&
+-		    (supported_modes[i].height == height)) {
+-			break;
+-		}
++	if ((width | height) & 0x3) {
++		v4l2_err(sd, "%s res not divisible by 4: %dx%d\n", __func__,
++				width, height);
++		return false;
+ 	}
+ 
+-	if (i == ARRAY_SIZE(supported_modes)) {
++	if (width < LT6911C_RES_MIN || width > LT6911C_RES_MAX_WIDTH ||
++	    height < LT6911C_RES_MIN || height > LT6911C_RES_MAX_HEIGHT) {
+ 		v4l2_err(sd, "%s do not support res wxh: %dx%d\n", __func__,
+ 				width, height);
+ 		return false;
+-	} else {
+-		return true;
+ 	}
++
++	return true;
+ }
+ 
+ static int lt6911c_get_detected_timings(struct v4l2_subdev *sd,
+@@ -480,6 +622,21 @@ static int lt6911c_get_detected_timings(struct v4l2_subdev *sd,
+ 
+ 	lt6911c_i2c_disable(sd);
+ 
++	/*
++	 * v18: Der Chip liefert sporadisch eine unfertige Messung
++	 * (HTOTAL = 0xFFFF -> htotal 131070). Frueher wurde das als
++	 * gueltiges Timing propagiert und hat den Encoder auf 20 fps
++	 * umkonfiguriert. Solche Samples verwerfen statt weiterreichen;
++	 * der naechste Poll liest wieder korrekt.
++	 */
++	if (htotal >= LT6911C_HTOTAL_INVALID ||
++	    (hact && (htotal <= hact || vtotal <= vact))) {
++		v4l2_dbg(1, debug, sd,
++			"%s: invalid measurement (total:%dx%d pixclk:%d), skip\n",
++			__func__, htotal, vtotal, pixel_clock);
++		return -EAGAIN;
++	}
++
+ 	if (!lt6911c_rcv_supported_res(sd, hact, vact)) {
+ 		lt6911c->nosignal = true;
+ 		v4l2_err(sd, "%s: rcv err res, return no signal!\n", __func__);
+@@ -501,12 +658,12 @@ static int lt6911c_get_detected_timings(struct v4l2_subdev *sd,
+ 	bt->vbackporch = vbp;
+ 	fps = fps_calc(bt);
+ 
+-	v4l2_info(sd, "act:%dx%d, total:%dx%d, pixclk:%d, fps:%d\n",
++	v4l2_dbg(1, debug, sd, "act:%dx%d, total:%dx%d, pixclk:%d, fps:%d\n",
+ 			hact, vact, htotal, vtotal, pixel_clock, fps);
+-	v4l2_info(sd, "hfp:%d, hs:%d, hbp:%d, vfp:%d, vs:%d, vbp:%d\n",
++	v4l2_dbg(1, debug, sd, "hfp:%d, hs:%d, hbp:%d, vfp:%d, vs:%d, vbp:%d\n",
+ 			bt->hfrontporch, bt->hsync, bt->hbackporch,
+ 			bt->vfrontporch, bt->vsync, bt->vbackporch);
+-	v4l2_info(sd, "inerlaced:%d,\n", bt->interlaced);
++	v4l2_dbg(1, debug, sd, "inerlaced:%d,\n", bt->interlaced);
+ 
+ 	return 0;
+ }
+@@ -592,17 +749,23 @@ static void lt6911c_format_change(struct v4l2_subdev *sd)
+ {
+ 	struct lt6911c_state *lt6911c = to_state(sd);
+ 	struct v4l2_dv_timings timings;
++	int ret;
+ 	const struct v4l2_event lt6911c_ev_fmt = {
+ 		.type = V4L2_EVENT_SOURCE_CHANGE,
+ 		.u.src_change.changes = V4L2_EVENT_SRC_CH_RESOLUTION,
+ 	};
+ 
+-	if (lt6911c_get_detected_timings(sd, &timings)) {
++	ret = lt6911c_get_detected_timings(sd, &timings);
++	if (ret == -EAGAIN) {
++		/* v18: transiente Fehlmessung - Zustand halten, nichts umschalten */
++		v4l2_dbg(1, debug, sd, "%s: skip bad sample\n", __func__);
++	} else if (ret) {
+ 		enable_stream(sd, false);
+ 
+ 		v4l2_dbg(1, debug, sd, "%s: No signal\n", __func__);
+ 	} else {
+-		if (!v4l2_match_dv_timings(&lt6911c->timings, &timings, 0, false)) {
++		if (!v4l2_match_dv_timings(&lt6911c->timings, &timings,
++					   LT6911C_PCLK_DELTA, false)) {
+ 			enable_stream(sd, false);
+ 			/* automatically set timing rather than set by user */
+ 			lt6911c_s_dv_timings(sd, &timings);
+@@ -649,7 +812,7 @@ static irqreturn_t plugin_detect_irq_handler(int irq, void *dev_id)
+ 	return IRQ_HANDLED;
+ }
+ 
+-static void lt6911c_irq_poll_timer(struct timer_list *t)
++static void __maybe_unused lt6911c_irq_poll_timer(struct timer_list *t)
+ {
+ 	struct lt6911c_state *lt6911c = from_timer(lt6911c, t, timer);
+ 
+@@ -701,7 +864,8 @@ static int lt6911c_s_dv_timings(struct v4l2_subdev *sd,
+ 		v4l2_print_dv_timings(sd->name, "s_dv_timings: ",
+ 				timings, false);
+ 
+-	if (v4l2_match_dv_timings(&lt6911c->timings, timings, 0, false)) {
++	if (v4l2_match_dv_timings(&lt6911c->timings, timings,
++				  LT6911C_PCLK_DELTA, false)) {
+ 		v4l2_dbg(1, debug, sd, "%s: no change\n", __func__);
+ 		return 0;
+ 	}
+@@ -1120,14 +1284,122 @@ static const struct v4l2_ctrl_config lt6911c_ctrl_audio_present = {
+ 
+ static void lt6911c_reset(struct lt6911c_state *lt6911c)
+ {
+-	gpiod_set_value(lt6911c->reset_gpio, 0);
+-	usleep_range(2000, 2100);
+-	gpiod_set_value(lt6911c->reset_gpio, 1);
+-	usleep_range(120*1000, 121*1000);
+-	gpiod_set_value(lt6911c->reset_gpio, 0);
+-	usleep_range(300*1000, 310*1000);
++	/* Power-Cycle NUR der zwei dedizierten Analog-Rails, SEQUENZIERT wie der
++	 * ausgelieferte Vendor-Reset (aus kernel-rm10-1100.elf: disable reg1+reg2 ->
++	 * msleep(2000) -> enable reg2 (+2-3ms) -> enable reg1 (+5-6ms) -> reset
++	 * deassert -> 50ms). Unser frueheres bulk_enable schaltete beide Rails
++	 * GLEICHZEITIG ein und zog vcc_1v8 (geteilt) mit rein -> RX-PLL initialisierte
++	 * nicht (Chip-Digitalteil lief via SPI-Firmware, daher Chip-ID ok, aber kein
++	 * Lock). supplies[]: [0]=avdd=vcc3v3, [1]=dovdd=vcc_1v8(geteilt, NICHT cyceln),
++	 * [2]=dvdd=vcc1v2. */
++	struct regulator *vcc3v3 = lt6911c->supplies[0].consumer;
++	struct regulator *vcc1v2 = lt6911c->supplies[2].consumer;
++	int ret;
++
++	gpiod_set_value(lt6911c->reset_gpio, 1);	/* assert */
++	regulator_disable(vcc1v2);
++	regulator_disable(vcc3v3);
++	msleep(2000);
++	ret = regulator_enable(vcc3v3);
++	usleep_range(2000, 3000);
++	ret |= regulator_enable(vcc1v2);
++	usleep_range(5000, 6000);
++	if (ret)
++		pr_warn("lt6911c: regulator re-enable im Reset fehlgeschlagen\n");
++	gpiod_set_value(lt6911c->reset_gpio, 0);	/* deassert */
++	usleep_range(50*1000, 60*1000);
++	msleep(2600); /* Chip laedt Firmware aus SPI-Flash ~2.5s */
+ }
+ 
++/* kvmd (x_upgrade) erwartet: echo 1 > /sys/bus/i2c/devices/1-002b/reset */
++static ssize_t reset_store(struct device *dev, struct device_attribute *attr,
++			   const char *buf, size_t count)
++{
++	struct v4l2_subdev *sd = dev_get_drvdata(dev);
++	struct lt6911c_state *lt6911c = to_state(sd);
++
++	lt6911c_reset(lt6911c);
++	gpiod_set_value(lt6911c->hpd_ctl_gpio, 1);
++	schedule_delayed_work(&lt6911c->delayed_work_res_change, HZ / 2);
++	return count;
++}
++static DEVICE_ATTR_WO(reset);
++
++/* GLKVM-Streamer liest diese sysfs-Attribute (Vendor-Kontrakt). Ohne
++ * "resolution" bricht der Streamer endlos ab ("can't open resolution file")
++ * -> kein Bild, obwohl der Chip lockt. Format wie Vendor: "BxH@FPS". */
++static ssize_t resolution_show(struct device *dev,
++			       struct device_attribute *attr, char *buf)
++{
++	struct v4l2_subdev *sd = dev_get_drvdata(dev);
++	struct lt6911c_state *lt6911c = to_state(sd);
++	struct v4l2_bt_timings *bt = &lt6911c->timings.bt;
++
++	if (lt6911c->nosignal || !bt->width)
++		return sprintf(buf, "0x0@0\n");
++	return sprintf(buf, "%ux%u@%u\n", bt->width, bt->height, fps_calc(bt));
++}
++static DEVICE_ATTR_RO(resolution);
++
++static ssize_t real_resolution_show(struct device *dev,
++				    struct device_attribute *attr, char *buf)
++{
++	return resolution_show(dev, attr, buf);
++}
++static DEVICE_ATTR_RO(real_resolution);
++
++static ssize_t hotplug_status_show(struct device *dev,
++				   struct device_attribute *attr, char *buf)
++{
++	struct v4l2_subdev *sd = dev_get_drvdata(dev);
++	struct lt6911c_state *lt6911c = to_state(sd);
++
++	return sprintf(buf, "%d\n", lt6911c->nosignal ? 0 : 1);
++}
++static DEVICE_ATTR_RO(hotplug_status);
++
++static ssize_t audio_present_show(struct device *dev,
++				  struct device_attribute *attr, char *buf)
++{
++	struct v4l2_subdev *sd = dev_get_drvdata(dev);
++	struct lt6911c_state *lt6911c = to_state(sd);
++
++	return sprintf(buf, "%d\n", lt6911c->is_audio_present ? 1 : 0);
++}
++static DEVICE_ATTR_RO(audio_present);
++
++/*
++ * Gibt die im Probe gecachten Bytes aus - macht bewusst KEIN I2C, genau wie
++ * show_firmware_version im Vendor (0xffffffc00854ff34: liest 5 gecachte
++ * Bytes aus dem Struct und sprintf't sie). v17 hatte hier zusaetzlich fuenf
++ * i2c_rd8 im Probe stehen, die dort nicht hingehoeren.
++ */
++static ssize_t version_show(struct device *dev,
++			    struct device_attribute *attr, char *buf)
++{
++	struct v4l2_subdev *sd = dev_get_drvdata(dev);
++	struct lt6911c_state *lt6911c = to_state(sd);
++	u8 *v = lt6911c->fw_version;
++
++	return sprintf(buf, "%x.%x.%x.%x.%x\n",
++			v[0], v[1], v[2], v[3], v[4]);
++}
++static DEVICE_ATTR_RO(version);
++
++static ssize_t audio_mute_show(struct device *dev,
++			       struct device_attribute *attr, char *buf)
++{
++	return sprintf(buf, "0\n");
++}
++static DEVICE_ATTR_RO(audio_mute);
++
++static ssize_t audio_sampling_rate_show(struct device *dev,
++					struct device_attribute *attr, char *buf)
++{
++	return sprintf(buf, "0\n");
++}
++static DEVICE_ATTR_RO(audio_sampling_rate);
++
+ static int lt6911c_init_v4l2_ctrls(struct lt6911c_state *lt6911c)
+ {
+ 	struct v4l2_subdev *sd;
+@@ -1229,6 +1501,25 @@ static int lt6911c_probe_of(struct lt6911c_state *lt6911c)
+ 		return ret;
+ 	}
+ 
++	/* v20: Der Vendor holt resolution-gpios (GL-DTS: GPIO4_A3 = gpio-131,
++	 * struct+32) als INPUT und haengt seinen Interrupt daran. */
++	lt6911c->resolution_gpio = devm_gpiod_get_optional(dev, "resolution",
++			GPIOD_IN);
++	if (IS_ERR(lt6911c->resolution_gpio)) {
++		dev_err(dev, "failed to get resolution gpio\n");
++		ret = PTR_ERR(lt6911c->resolution_gpio);
++		return ret;
++	}
++	/* GL-DTS nennt die Plugin-Detect-Leitung "hotplug" und fuehrt sie als
++	 * INPUT (auf Vendor: gpio-134 "in"). Der Chip steuert HPD zur Quelle
++	 * intern. v9 holte sie faelschlich als hpd_ctl-OUTPUT und trieb sie ->
++	 * blockierte die chip-interne HPD-Logik -> Chip nie gelockt (hact=0).
++	 * Fix: als plugin_det INPUT holen, hpd_ctl_gpio NULL lassen
++	 * (gpiod_set_value(NULL,..) ist ein sicheres No-op). */
++	if (!lt6911c->plugin_det_gpio)
++		lt6911c->plugin_det_gpio = devm_gpiod_get_optional(dev, "hotplug",
++				GPIOD_IN);
++
+ 	ep = of_graph_get_next_endpoint(dev->of_node, NULL);
+ 	if (!ep) {
+ 		dev_err(dev, "missing endpoint node\n");
+@@ -1248,6 +1539,33 @@ static int lt6911c_probe_of(struct lt6911c_state *lt6911c)
+ 		goto free_endpoint;
+ 	}
+ 
++	/* WIDERLEGT (Session 3): der cam_clk0-Pinmux ist NICHT noetig. Auf dem
++	 * Vendor-Kernel ist pin 137 (gpio4-9) "MUX UNCLAIMED" und
++	 * clk_mipi1_out2io enable_count=0 - trotzdem lockt der Chip auf
++	 * 2560x1440@60. Der LT6911C braucht keinen SoC-Referenztakt (eigener
++	 * Oszillator/SPI-Flash). Der Vendor-Treiber ruft devm_pinctrl_get +
++	 * pinctrl_lookup_state fuer beide States, wendet den default-State aber
++	 * NIE an (select nur des sleep-States in __lt6911c_power_off).
++	 * v15 muxte cam_clk0 und legte 24 MHz auf den Pin - einzige aktive
++	 * Deviation vom Vendor und Hauptverdacht fuer den fehlenden Cold-Lock. */
++	lt6911c->pinctrl = devm_pinctrl_get(dev);
++	if (IS_ERR(lt6911c->pinctrl)) {
++		dev_warn(dev, "pinctrl nicht verfuegbar (%ld)\n",
++				PTR_ERR(lt6911c->pinctrl));
++	} else {
++		struct pinctrl_state *st;
++
++		st = pinctrl_lookup_state(lt6911c->pinctrl,
++				"rockchip,camera_default");
++		if (IS_ERR(st))
++			dev_info(dev, "could not get default pinstate\n");
++		st = pinctrl_lookup_state(lt6911c->pinctrl,
++				"rockchip,camera_sleep");
++		if (IS_ERR(st))
++			dev_info(dev, "could not get sleep pinstate\n");
++		/* bewusst KEIN pinctrl_select_state - wie Vendor */
++	}
++
+ 	lt6911c->xvclk = devm_clk_get(dev, "xvclk");
+ 	if (IS_ERR(lt6911c->xvclk)) {
+ 		dev_err(dev, "failed to get xvclk\n");
+@@ -1255,16 +1573,25 @@ static int lt6911c_probe_of(struct lt6911c_state *lt6911c)
+ 		goto free_endpoint;
+ 	}
+ 
+-	ret = clk_prepare_enable(lt6911c->xvclk);
+-	if (ret) {
+-		dev_err(dev, "Failed! to enable xvclk\n");
+-		goto free_endpoint;
+-	}
++	/* Vendor holt xvclk nur (devm_clk_get) und enabled ihn NIE - der Chip
++	 * laeuft ohne SoC-Takt. clk_prepare_enable daher entfernt (v16). */
+ 
+ 	lt6911c->csi_lanes_in_use = endpoint.bus.mipi_csi2.num_data_lanes;
+ 	lt6911c->bus = endpoint.bus.mipi_csi2;
+ 	lt6911c->enable_hdcp = false;
+ 
++	lt6911c->supplies[0].supply = "avdd";
++	lt6911c->supplies[1].supply = "dovdd";
++	lt6911c->supplies[2].supply = "dvdd";
++	ret = devm_regulator_bulk_get(dev, ARRAY_SIZE(lt6911c->supplies), lt6911c->supplies);
++	if (ret)
++		dev_warn(dev, "regulators nicht verfuegbar (%d), fahre fort\n", ret);
++	else if (regulator_bulk_enable(ARRAY_SIZE(lt6911c->supplies), lt6911c->supplies))
++		dev_warn(dev, "regulator enable fehlgeschlagen\n");
++	else {
++		dev_info(dev, "avdd/dovdd/dvdd regulators enabled\n");
++		msleep(20);
++	}
+ 	gpiod_set_value(lt6911c->hpd_ctl_gpio, 0);
+ 	gpiod_set_value(lt6911c->power_gpio, 1);
+ 	lt6911c_reset(lt6911c);
+@@ -1290,6 +1617,7 @@ static int lt6911c_check_chip_id(struct lt6911c_state *lt6911c)
+ 	u8 id_h, id_l;
+ 	u32 chipid;
+ 	int ret = 0;
++	int i;
+ 
+ 	lt6911c_i2c_enable(sd);
+ 	id_l  = i2c_rd8(sd, CHIPID_REGL);
+@@ -1304,6 +1632,24 @@ static int lt6911c_check_chip_id(struct lt6911c_state *lt6911c)
+ 	}
+ 	dev_info(dev, "check chipid ok, id:%#x", chipid);
+ 
++	/*
++	 * Firmware-Version genau hier lesen und cachen - der Vendor tut es an
++	 * derselben Stelle, direkt nach bestaetigter Chip-ID und VOR
++	 * lt6911c_reset. Die Register fuehren die Version erst, wenn der Chip
++	 * seine Firmware aus dem SPI-Flash geladen hat; vorher steht dort
++	 * anderes Material. Wert wird geloggt, damit ein Fehlwert sofort im
++	 * dmesg sichtbar ist statt erst als Reflash-Schleife.
++	 */
++	lt6911c_i2c_enable(sd);
++	for (i = 0; i < FW_VERSION_LEN; i++)
++		lt6911c->fw_version[i] = i2c_rd8(sd, FW_VERSION_BASE + i);
++	lt6911c_i2c_disable(sd);
++
++	dev_info(dev, "Firmware Version: %x.%x.%x.%x.%x\n",
++			lt6911c->fw_version[0], lt6911c->fw_version[1],
++			lt6911c->fw_version[2], lt6911c->fw_version[3],
++			lt6911c->fw_version[4]);
++
+ 	return ret;
+ }
+ 
+@@ -1381,25 +1727,49 @@ static int lt6911c_probe(struct i2c_client *client,
+ 			lt6911c_delayed_work_enable_hotplug);
+ 	INIT_DELAYED_WORK(&lt6911c->delayed_work_res_change,
+ 			lt6911c_delayed_work_res_change);
++	device_create_file(&client->dev, &dev_attr_reset);
++	device_create_file(&client->dev, &dev_attr_version);
++	device_create_file(&client->dev, &dev_attr_resolution);
++	device_create_file(&client->dev, &dev_attr_real_resolution);
++	device_create_file(&client->dev, &dev_attr_hotplug_status);
++	device_create_file(&client->dev, &dev_attr_audio_present);
++	device_create_file(&client->dev, &dev_attr_audio_mute);
++	device_create_file(&client->dev, &dev_attr_audio_sampling_rate);
++
++	/*
++	 * v20: Der Vendor haengt den Interrupt per gpiod_to_irq() an das
++	 * resolution-GPIO, NICHT an client->irq - der DTS-Knoten lt6911@2b
++	 * hat kein interrupts-Property, client->irq ist also 0. Ohne diesen
++	 * IRQ fiel der Treiber in einen 1-Hz-Poll, der dem Chip waehrend der
++	 * HDMI-Akquise regelmaessig den I2C-Bus wegnimmt und den Lock
++	 * verhindert (gemessen: Busaktivitaet im Akquisefenster blockiert den
++	 * Lock dauerhaft bis zum naechsten Rail-Power-Cycle).
++	 * Vendor-Aufruf exakt: handler=lt6911c_res_change_irq_handler,
++	 * thread_fn=NULL, flags=IRQF_TRIGGER_RISING (kein ONESHOT),
++	 * name="lt6911c_res_change". Kein Poll-Fallback - der Vendor hat
++	 * keinen, und ein stiller Poll wuerde genau den Fehler zurueckholen.
++	 */
++	INIT_WORK(&lt6911c->work_i2c_poll, lt6911c_work_i2c_poll);
++
++	lt6911c->res_irq = -1;
++	if (lt6911c->resolution_gpio)
++		lt6911c->res_irq = gpiod_to_irq(lt6911c->resolution_gpio);
++	if (lt6911c->res_irq < 0 && lt6911c->i2c_client->irq)
++		lt6911c->res_irq = lt6911c->i2c_client->irq;
++
++	if (lt6911c->res_irq < 0) {
++		v4l2_err(sd, "no res_change irq available!\n");
++		err = -ENODEV;
++		goto err_work_queues;
++	}
+ 
+-	if (lt6911c->i2c_client->irq) {
+-		v4l2_dbg(1, debug, sd, "cfg lt6911c irq!\n");
+-		err = devm_request_threaded_irq(dev,
+-				lt6911c->i2c_client->irq,
+-				NULL, lt6911c_res_change_irq_handler,
+-				IRQF_TRIGGER_RISING | IRQF_ONESHOT,
+-				"lt6911c", lt6911c);
+-		if (err) {
+-			v4l2_err(sd, "request irq failed! err:%d\n", err);
+-			goto err_work_queues;
+-		}
+-	} else {
+-		v4l2_dbg(1, debug, sd, "no irq, cfg poll!\n");
+-		INIT_WORK(&lt6911c->work_i2c_poll, lt6911c_work_i2c_poll);
+-		timer_setup(&lt6911c->timer, lt6911c_irq_poll_timer, 0);
+-		lt6911c->timer.expires = jiffies +
+-				       msecs_to_jiffies(POLL_INTERVAL_MS);
+-		add_timer(&lt6911c->timer);
++	v4l2_dbg(1, debug, sd, "cfg res_change irq %d\n", lt6911c->res_irq);
++	err = devm_request_threaded_irq(dev, lt6911c->res_irq,
++			lt6911c_res_change_irq_handler, NULL,
++			IRQF_TRIGGER_RISING, "lt6911c_res_change", lt6911c);
++	if (err) {
++		v4l2_err(sd, "request res_change irq failed! err:%d\n", err);
++		goto err_work_queues;
+ 	}
+ 
+ 	lt6911c->plugin_irq = gpiod_to_irq(lt6911c->plugin_det_gpio);
+@@ -1423,6 +1793,22 @@ static int lt6911c_probe(struct i2c_client *client,
+ 	v4l2_info(sd, "%s found @ 0x%x (%s)\n", client->name,
+ 			client->addr << 1, client->adapter->name);
+ 
++	/*
++	 * v22: Einmaliger Anstoss nach dem Probe, wie der Vendor. Die
++	 * resolution-Leitung ist ein IMPULS, kein Pegel (gpio-131 liegt auch
++	 * im gelockten Zustand low). Der Chip lockt rund 5 s nach Rails-an,
++	 * also deutlich vor dem Ende dieses Probe - die Flanke faellt dann in
++	 * ein Fenster, in dem der IRQ noch nicht registriert ist, und geht
++	 * verloren. Ohne diesen Anstoss bleibt der Treiber blind, obwohl der
++	 * Chip gelockt ist (gemessen: fm=0x01d7ad und 0xD211=0x55 bei
++	 * resolution=0x0@0 und IRQ-Zaehler 0, ueber 100 s hinweg).
++	 * Der Vendor macht dasselbe: im Bootlog 73 ms nach "probe exit"
++	 * erscheint "0xD211 is 0", also ein Lauf der res_change-Work ohne
++	 * vorausgegangenen Interrupt. Das ist kein Poll - er laeuft genau
++	 * einmal, danach traegt wieder der IRQ.
++	 */
++	schedule_delayed_work(&lt6911c->delayed_work_res_change, HZ / 20);
++
+ 	return 0;
+ 
+ err_work_queues:
+@@ -1458,12 +1844,13 @@ static void lt6911c_remove(struct i2c_client *client)
+ #endif
+ 	v4l2_ctrl_handler_free(&lt6911c->hdl);
+ 	mutex_destroy(&lt6911c->confctl_mutex);
+-	clk_disable_unprepare(lt6911c->xvclk);
++	/* xvclk wird nie enabled (v16) -> kein disable_unprepare */
+ }
+ 
+ #if IS_ENABLED(CONFIG_OF)
+ static const struct of_device_id lt6911c_of_match[] = {
+ 	{ .compatible = "lontium,lt6911c" },
++	{ .compatible = "lontium, lt6911" }, /* GL-DTS-Compatible (sic, mit Leerzeichen) */
+ 	{},
+ };
+ MODULE_DEVICE_TABLE(of, lt6911c_of_match);
