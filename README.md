@@ -49,7 +49,28 @@ before it writes, `revert-kernel.sh` puts it back.
 | Vendor modules | All six load: `kmpp`, `kmpp_smart`, `rockit*`, `gl-hw-info` |
 | Streaming | Unchanged: kvmd, ustreamer, WebRTC over the vendor pipeline |
 
-Tested on GL-RM1PE with firmware V1.9.1 release1, kernel 6.1.141.
+## Tested with
+
+| | |
+| --- | --- |
+| Device | GL.iNet **GL-RM1PE** (Comet PoE), `/proc/gl-hw-info/model` = `rm1pe` |
+| Board | Rockchip RV1126B-P, device tree `Rockchip RV1126B-P EVB V14 Board` |
+| Stock firmware | **V1.9.1 release1** (`RK_VERSION` in `/etc/version`) |
+| HDMI bridge | LT6911C, chip firmware 49.25.3.3.1 |
+| Kernel | 6.1.141, release `v23` |
+| Sources tested | 2560x1440@60, 3840x2160@30, 1920x1080@60, 1920x1280@60 |
+| WLAN stick | Realtek RTL8188EU (`0bda:8179`) |
+
+`install.sh` **refuses to run on anything else.** If your firmware is newer,
+that is not a bug report about your device -- open an issue with
+`cat /etc/version` and it gets added once it has been checked.
+
+Two honest limits. This has run on **one** device, which has been through every
+version of this kernel; a factory-fresh unit is not the same test. And there is
+no long-term data yet -- days of uptime, not weeks.
+
+If you are on a different firmware or an RM10 and want to help, that is exactly
+the gap: an issue with your `/etc/version` is a useful contribution.
 
 ## Two ways in
 
@@ -138,10 +159,16 @@ firmware we have actually run on:
 * and it asks you to type `yes` before writing (`--yes` skips it)
 
 Then it downloads the release kernel and `scripts/patch-fit.py` and verifies
-both against checksums pinned in the script, swaps the kernel inside the FIT
-already in your boot partition, backs that partition up, writes, and reads back
-to compare. It never reboots, and it restores the backup by itself if the
-read-back does not match.
+both against checksums pinned in the script, and swaps the kernel inside the
+FIT already in your boot partition.
+
+Nothing is written until that image exists and is checked. The FIT already in
+your partition has to match its own recorded checksums before its device tree
+and resource blob are reused -- a damaged partition is refused rather than
+copied forward. The backup is compared against the partition it came from, and
+the install aborts if it does not match, because a backup nobody verified is
+not a way back. After writing, the partition is read back and compared; if that
+fails the backup goes straight back in. It never reboots.
 
 The same script rolls back, which is why it is worth keeping on the device
 rather than piping it -- a rollback then needs no network:
@@ -156,6 +183,11 @@ Piped straight into a shell, arguments go after `-s --`:
 ```sh
 curl -sSL https://raw.githubusercontent.com/macpit/glkvm-rm1pe-kernel/main/install.sh | sh -s -- --list
 ```
+
+The one thing no script can protect you from is losing power in the middle of
+the write. It takes a couple of seconds; do it on mains or PoE you trust, not
+on a device someone might unplug. A dropped SSH session is handled -- the write
+ignores hangups so it finishes either way.
 
 > **This overwrites a boot partition from a shell pipeline.** Read the script
 > before you run it -- it is a few hundred lines and does nothing clever.

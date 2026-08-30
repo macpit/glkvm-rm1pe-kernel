@@ -158,6 +158,17 @@ def main():
         if pos + size > len(blob):
             die("image '%s' runs past the end of the source" % p)
     payload = {p: bytes(blob[pos:pos + size]) for p, (pos, size) in lay.items()}
+
+    # The fdt and resource blobs are carried over untouched, so the source has
+    # to be sound before we build anything on top of it. Every FIT records a
+    # sha256 per image; check them rather than assume.
+    for p in PARTS:
+        hoff, _ = idx[p]["value"]
+        stored = bytes(blob[hoff:hoff + 32])
+        if hashlib.sha256(payload[p]).digest() != stored:
+            die("image '%s' in the source does not match its recorded sha256.\n"
+                "The boot partition looks damaged or is not one we know. "
+                "Refusing to build on it." % p)
     payload["kernel"] = newk
 
     # fdt keeps its position; everything after it follows from the sizes.

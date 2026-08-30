@@ -21,7 +21,7 @@ REPO="macpit/glkvm-rm1pe-kernel"
 TAG="${TAG:-v23}"
 KERNEL_NAME="Image-6.1.141-${TAG}"
 KERNEL_SHA="d96cd811f8cf3888a5185b9c69f5e379f36888527584842a0135092a850581fd"
-PATCHER_SHA="4ed17024287a457625a20fa4c42848feade06baa5e6b7006ca0b238e8dc47c4e"
+PATCHER_SHA="dd7564615e1301e2cea804eadedd60bb1e03c6538cb74951510569406ce2a004"
 
 ISSUES="https://github.com/${REPO}/issues"
 
@@ -161,8 +161,14 @@ write_and_verify() {  # write_and_verify <file> <label>
         || die "$2 is $_size bytes, larger than the $PART_BYTES byte partition"
     is_fit "$1" || die "$2 does not start with the FIT magic; refusing to write it"
     say "==> writing"
+    # From here to the end of sync, an interrupted write leaves a boot
+    # partition that is neither the old nor the new image -- which on this
+    # hardware means a serial console to recover. A dropped SSH session is
+    # the likely way that happens, so refuse to die halfway through.
+    trap '' HUP INT TERM QUIT
     cat "$1" > "$BOOT"
     sync
+    trap - HUP INT TERM QUIT
     sleep 1
     _back=$(head -c "$_size" "$BOOT" | sha256sum | cut -d' ' -f1)
     [ "$_back" = "$_sha" ] || return 1
@@ -269,7 +275,18 @@ STAMP=$(date +%Y%m%d-%H%M%S)
 BACKUP="$BACKUP_DIR/boot-backup-$STAMP.img"
 say "==> backing up the current boot partition to $BACKUP"
 cat "$BOOT" > "$BACKUP"
+sync
 [ "$(stat -c%s "$BACKUP")" = "$PART_BYTES" ] || die "backup is short, aborting"
+# This backup is the way back, and the user is told so at the end. A size
+# check does not prove it was copied correctly, so compare the content.
+if [ "$(sha256sum "$BACKUP" | cut -d' ' -f1)" \
+   != "$(head -c "$PART_BYTES" "$BOOT" | sha256sum | cut -d' ' -f1)" ]; then
+    rm -f "$BACKUP"
+    die "the backup does not match the partition it was copied from.
+Refusing to continue: without a good backup there is no way back.
+Check free space and the health of /userdata, then try again."
+fi
+say "    backup verified"
 
 if ! write_and_verify "$WORK/new.img" "the new image"; then
     say "    MISMATCH after write, restoring the backup"
