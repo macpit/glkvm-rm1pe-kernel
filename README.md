@@ -56,6 +56,11 @@ Tested on GL-RM1PE with firmware V1.9.1 release1, kernel 6.1.141.
 You need a build machine with an aarch64 cross toolchain, `u-boot-tools` and
 `device-tree-compiler`, plus SSH access to the KVM.
 
+The scripts in `scripts/` run on that build machine, not on the KVM: they call
+`mkimage` and `fdtget`, which the device does not have. They also assume
+key-based SSH, so run `ssh-copy-id root@<device>` first -- otherwise every step
+stops to ask for the dropbear password.
+
 ```sh
 git clone https://github.com/gl-inet/kernel-6.1 kernel && cd kernel
 # 1. bring the tree to 6.1.141  -- see docs/build.md, this is required
@@ -91,6 +96,45 @@ scripts/revert-kernel.sh 192.168.1.10 /userdata/kernel-backup/boot-backup-....im
 `install-kernel.sh` backs up the running boot partition before it writes, so
 the way back exists from the first run onwards.
 
+## Install without building
+
+If you only want the release kernel and not a build environment, this runs on
+the KVM itself:
+
+```sh
+curl -sSL https://raw.githubusercontent.com/macpit/glkvm-rm1pe-kernel/main/install.sh | sh
+```
+
+It checks the model, downloads the release kernel and `scripts/patch-fit.py`
+and verifies both against checksums pinned in the script, swaps the kernel
+inside the FIT already in your boot partition, backs that partition up, writes,
+and reads back to compare. It never reboots, and it restores the backup by
+itself if the read-back does not match.
+
+> **This overwrites a boot partition from a shell pipeline.** Read the script
+> before you run it -- it is 110 lines and does nothing clever. `curl | sh`
+> means trusting GitHub to serve you the right file; the script cannot verify
+> itself, only what it downloads afterwards. If that trade is not acceptable,
+> download it, read it, then run it. The safer path is still the build route
+> above with a serial console attached.
+
+Nothing proprietary is downloaded: your device tree and the Rockchip resource
+blob stay in place, only the kernel payload is replaced. The way back is
+printed at the end and needs no network.
+
+`patch-fit.py` rewrites the FIT header in place rather than rebuilding it. The
+fields that change are fixed width -- `data-size` and `data-position` are 32
+bits, the SHA256 in each hash node is 32 bytes -- so no `mkimage`, no `dtc` and
+no libfdt are needed on the device. Only `python3`, which is already there. It
+also works standalone:
+
+```sh
+patch-fit.py --info /dev/block/by-name/boot     # show the layout
+patch-fit.py /dev/block/by-name/boot Image out.img
+```
+
+It always writes to a separate file and never to a block device on its own.
+
 ## Why the stock source tree is not enough
 
 The published `gl-inet/kernel-6.1` builds, but it is not the source of the
@@ -111,8 +155,10 @@ this repository is the practical way to a kernel you can actually modify.
 ## Layout
 
 ```
+install.sh  one-line installer, runs on the device itself
 patches/    the four patches, in order
 scripts/    build the FIT, install it, roll it back -- all over SSH
+            patch-fit.py swaps the kernel inside an existing FIT, on the device
 wlan-ap/    access point and captive portal, ready to drop into /userdata
 docs/       build, recovery, the LT6911C driver, the access point
 ```

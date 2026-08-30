@@ -14,11 +14,22 @@ BACKUP_DIR=/userdata/kernel-backup
 [ -n "$DEV" ] || { echo "usage: $0 <device-ip> [backup-file]" >&2; exit 1; }
 
 if [ -z "$PICK" ]; then
-    echo "Backups on the device, newest first:"
-    ssh "$SSH_USER@$DEV" "ls -1t $BACKUP_DIR/boot-backup-*.img 2>/dev/null" || {
-        echo "  none found. If the device no longer boots: docs/recovery.md" >&2
+    # boot-*.img, not just boot-backup-*.img: images put there by hand are just
+    # as valid a target, and a stock device has none of either until the first
+    # install-kernel.sh run.
+    LIST=$(ssh "$SSH_USER@$DEV" "ls -1t $BACKUP_DIR/boot-*.img 2>/dev/null || true") || {
+        echo "cannot reach $DEV over SSH." >&2
+        echo "If the device no longer boots at all, use the U-Boot route in docs/recovery.md" >&2
         exit 1
     }
+    if [ -z "$LIST" ]; then
+        echo "No images in $BACKUP_DIR on $DEV." >&2
+        echo "install-kernel.sh puts one there before it writes, so there is" >&2
+        echo "nothing to roll back to yet." >&2
+        exit 1
+    fi
+    echo "Images on the device, newest first:"
+    echo "$LIST"
     echo
     echo "Pick one: $0 $DEV <file>"
     exit 0
