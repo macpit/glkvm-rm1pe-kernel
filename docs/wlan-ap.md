@@ -41,7 +41,7 @@ chipset:
 4. Check whether the driver speaks nl80211 or only WEXT before you plan on AP
    mode.
 
-Reports about other chipsets are welcome — open an issue and say what worked.
+Reports about other chipsets are welcome, open an issue and say what worked.
 
 ## Access point
 
@@ -64,7 +64,7 @@ The AP lives on `192.192.193.1/24` and hands out `.100` to `.150`.
 ### Autostart, and a trap worth knowing
 
 `/etc/init.d/rcS` expands its `for i in /etc/init.d/S??*` glob **once, at
-start** — which is before `S08overlayfs` does its `pivot_root`. A script that
+start**, which is before `S08overlayfs` does its `pivot_root`. A script that
 exists only in the overlay is invisible at that moment and is never started.
 `rcK` re-globs at shutdown, when the overlay is active, so such a script gets
 `stop` calls and never a `start`, which is a confusing thing to debug.
@@ -117,11 +117,11 @@ drop the second server block and accept the warning.
 
 ### What macOS will and will not do
 
-Worth writing down, because it cost us an afternoon:
+This cost us an afternoon, so:
 
 * You **cannot** open a real browser from the captive window. `window.open` and
   `target="_blank"` stay inside it. Foreign URL schemes are handed to
-  LaunchServices, so any app with its own scheme can be launched — but
+  LaunchServices, so any app with its own scheme can be launched, but
   `x-safari-http://` is blocked from there, at least on current macOS.
 * The **user agent is not a reliable signal**. The system prober identifies as
   `CaptiveNetworkSupport-...`, but the web view inside the same window sends an

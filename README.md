@@ -24,21 +24,19 @@ patches, and the changes in `patches/`. No vendor binaries are redistributed.
 > A serial console is strongly recommended for the first flash. See
 > [docs/recovery.md](docs/recovery.md).
 
-### Status: first cut
+### Status
 
-This is release one. It runs well on the two devices we have, and it has not
-been near anyone else's hardware yet. Treat it accordingly.
+First release. It works on the two devices I have and has never touched anyone
+else's hardware.
 
-You should be comfortable with a cross-compiled kernel build, with reading a
-boot log, and with the idea that the device may not come back on its own. The
-install and revert scripts only help while the device still boots far enough
-for SSH. **Once it does not, you need a serial console** — and on the RM1PE
-that means opening the case and soldering a wire to the RX pad, because it is
-not broken out. If that sentence gives you pause, wait for a later release or
-get the cable ready before you start, not after.
+You need to be comfortable with a cross-compiled kernel build and with reading
+a boot log. The install and revert scripts only help while the device still
+boots far enough for SSH. After that you need a serial console, and on the
+RM1PE that means opening the case and soldering to the RX pad, since it is not
+broken out. Get a cable before you start if you do not have one.
 
-Everything else here is reversible. `install-kernel.sh` backs up the running
-boot partition before it writes, and `revert-kernel.sh` puts it back.
+Everything else is reversible. `install-kernel.sh` backs up the boot partition
+before it writes, `revert-kernel.sh` puts it back.
 
 ## What works
 
@@ -122,18 +120,17 @@ docs/       build, recovery, the LT6911C driver, the access point
 ## Planned
 
 * **A tool to patch a firmware image you downloaded yourself.** Right now you
-  build a kernel and install it onto a running device. The easier path is a
-  script that takes an official OTA image *you* fetched from GL.iNet's download
-  page, replaces the kernel inside it with ours, and hands the result back to
-  you for the normal update mechanism — no cross toolchain, no SSH surgery on a
-  live system, and a familiar way back by reinstalling the stock image.
+  build a kernel and install it onto a running device. Easier would be a script
+  that takes an official OTA image you fetched from GL.iNet's download page,
+  swaps in our kernel, and hands the file back for the normal update mechanism.
+  No cross toolchain, no SSH surgery on a live system, and the way back is to
+  reinstall the stock image.
 
-  To be explicit about what this is and is not: we would ship **the tool, never
-  an image**. Nothing that GL.iNet distributes gets re-distributed by us; the
-  script operates on a file that is already on your machine and produces a
-  result that stays there. The RKFW/RKAF container is understood well enough to
-  unpack and repack; what is missing is the tooling and a second device to test
-  on without risking a working one.
+  We would ship the tool, not an image. The script runs on a file that is
+  already on your machine and the result stays there. The RKFW/RKAF container
+  unpacks and repacks well enough already; missing are the tooling and a second
+  device to test on.
+
 * **Audio.** The sample rate is still hardcoded to 48 kHz upstream of us
   ([glkvm#136](https://github.com/gl-inet/glkvm/issues/136)); non-48 kHz sources
   come through pitch-shifted. Untouched so far.
@@ -144,9 +141,9 @@ docs/       build, recovery, the LT6911C driver, the access point
 
 ## Contributing
 
-Bug reports and patches are welcome, especially from anyone with a different
-HDMI source, a different WLAN stick, or an RM10. The LT6911C is used on several
-devices and the driver situation is the same everywhere.
+Bug reports and patches welcome, especially from anyone with a different HDMI
+source, a different WLAN stick, or an RM10. The LT6911C sits in several devices
+and the driver situation is much the same on all of them.
 
 If you have a source that shows a picture on the stock firmware but not here,
 open an issue with `dmesg | grep lt6911` and the output of
@@ -154,37 +151,30 @@ open an issue with `dmesg | grep lt6911` and the output of
 
 ## Legal
 
-Not legal advice, just the reasoning behind how this repository is put
-together. If it matters to you, ask someone qualified in your jurisdiction.
+I am not a lawyer. This is how the repository is put together and why.
 
-**Nothing of GL.iNet's is redistributed here.** The patches are our own work
-against their published GPL sources. The kernel we build contains no vendor
-binaries. `build-fit.sh` pulls the board device tree and the Rockchip resource
-blob from *your* device at build time rather than shipping copies, and the
-planned image tool will work the same way: on a file you downloaded yourself.
+No GL.iNet binaries are redistributed here. The patches are written against
+their published GPL sources. `build-fit.sh` reads the device tree and the
+Rockchip resource blob off your own device instead of shipping copies, and the
+planned image tool will work on a file you downloaded yourself.
 
-**Modifying software on hardware you own is a different thing from
-distributing it.** Copyright governs copying and distribution. Changing the
-firmware on your own device — to fix a bug, in this case a capture path that
-does not work — is covered by the rights a lawful acquirer has under Swiss and
-EU law, and those rights cannot be signed away by boilerplate.
+Changing the firmware on hardware you own is not the same as distributing it.
+Copyright covers copying and distribution. Swiss and EU law give a lawful
+acquirer the right to correct errors in software they bought, and terms of use
+cannot take that away.
 
-**The kernel is GPL-2.0**, and GPLv2 section 6 forbids imposing further
-restrictions on downstream recipients. Whatever a vendor's terms of use say
-about modification, they cannot narrow the licence on the GPL parts — which is
-all we touch.
+The kernel is GPL-2.0. Section 6 forbids adding restrictions for downstream
+recipients, so a vendor's terms cannot narrow the licence on the parts this
+repository patches.
 
-**No technical protection measure is being circumvented.** Secure boot is not
-active on this device: the boot log reports `Verified-boot: 0`, the U-Boot
-control FDT contains no `/signature` node, and unsigned FIT images with correct
-hashes boot normally. There is nothing here to bypass.
+There is no secure boot to bypass. The boot log says `Verified-boot: 0`, the
+U-Boot control FDT has no `/signature` node, and unsigned FIT images boot
+normally.
 
-**Your warranty is very likely void** once you write your own kernel to the
-boot partition, and support from the vendor for a modified device is not
-something to count on. That is the trade, and it is yours to make.
+Expect your warranty to be void, and do not count on vendor support for a
+modified device.
 
-**Not affiliated with GL.iNet.** Product and company names are used to say
-which hardware this runs on, nothing more.
+Not affiliated with GL.iNet.
 
 ## License
 
