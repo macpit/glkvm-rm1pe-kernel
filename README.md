@@ -24,6 +24,22 @@ patches, and the changes in `patches/`. No vendor binaries are redistributed.
 > A serial console is strongly recommended for the first flash. See
 > [docs/recovery.md](docs/recovery.md).
 
+### Status: first cut
+
+This is release one. It runs well on the two devices we have, and it has not
+been near anyone else's hardware yet. Treat it accordingly.
+
+You should be comfortable with a cross-compiled kernel build, with reading a
+boot log, and with the idea that the device may not come back on its own. The
+install and revert scripts only help while the device still boots far enough
+for SSH. **Once it does not, you need a serial console** — and on the RM1PE
+that means opening the case and soldering a wire to the RX pad, because it is
+not broken out. If that sentence gives you pause, wait for a later release or
+get the cable ready before you start, not after.
+
+Everything else here is reversible. `install-kernel.sh` backs up the running
+boot partition before it writes, and `revert-kernel.sh` puts it back.
+
 ## What works
 
 | | |
@@ -102,6 +118,26 @@ scripts/    build the FIT, install it, roll it back -- all over SSH
 wlan-ap/    access point and captive portal, ready to drop into /userdata
 docs/       build, recovery, the LT6911C driver, the access point
 ```
+
+## Planned
+
+* **Patch GL.iNet's own firmware images.** Right now you build a kernel and
+  install it onto a device that is already running. The nicer path is to take
+  an official OTA image, replace the kernel inside it, and flash the result
+  through the normal update mechanism — no cross toolchain, no SSH surgery, and
+  a familiar way back by simply reinstalling the stock image. The RKFW/RKAF
+  format is already understood well enough to unpack and repack; what is
+  missing is the tooling and a second device to test it on without risking the
+  working one. Note that this will always be a script you run on an image *you*
+  downloaded: a pre-patched image would mean redistributing GL's binaries,
+  which is exactly what we are asking them not to do to us.
+* **Audio.** The sample rate is still hardcoded to 48 kHz upstream of us
+  ([glkvm#136](https://github.com/gl-inet/glkvm/issues/136)); non-48 kHz sources
+  come through pitch-shifted. Untouched so far.
+* **The measurement bug from the forum**, where the chip reports the active
+  resolution one or two pixels off. Present on stock firmware too, and not
+  fixed in 1.10.x.
+* **More WLAN sticks**, once someone reports what works.
 
 ## Contributing
 
