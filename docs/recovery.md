@@ -2,54 +2,19 @@
 
 Ways back, in order of how much has gone wrong.
 
-**Plan for needing the serial console.** The vendor's own failsafe routes are
-documented below and are worth trying first, but the one time this project
-actually bricked a device, they did not get it back -- serial and U-Boot did.
-Do not start on the assumption that a web page will save you.
+**Plan for needing the serial console.** If the device stops booting, that is
+what gets it back. Do not start on the assumption that something easier will.
 
-## 0. The vendor's failsafe routes: try them, do not count on them
-
-GL.iNet document a U-Boot web recovery for this hardware. It is quick to
-attempt and costs nothing, so it is the first thing to try -- but see the
-caveat at the end of this section before you rely on it.
-
-For the **GL-RM1PE**, from
-[GL's own documentation](https://docs.gl-inet.com/kvm/en/faq/debrick/):
-
-1. Download the stock firmware from <https://dl.gl-inet.com/kvm>.
-2. Power the KVM off. Connect it directly to your computer's Ethernet port.
-3. **Hold the Reset button and power the device on at the same time.** The blue
-   LED flashes five times; release Reset after that, and the LED goes solid.
-4. Set your computer's Ethernet interface to `192.168.1.2` / `255.255.255.0`.
-5. Open `http://192.168.1.1` -- that is the U-Boot web UI. Choose the firmware
-   file and click Update. It takes about three minutes; do not cut the power.
-
-GL document two further routes that also need no serial console:
-[RKDevTool](https://docs.gl-inet.com/kvm/en/tutorials/how_to_debrick_kvm_via_rkdevtool/)
-and [USB OTG](https://docs.gl-inet.com/kvm/en/tutorials/how_to_unbrick_kvm_via_usb_otg/).
-
-All three restore the stock image. If you only want your previous kernel back
-and the device still gives you a shell, use option 1 instead.
-
-> ### The caveat, and it is a real one
->
-> **This did not work here when it was needed.** The one time a device in this
-> project was left unbootable, the vendor recovery route did not bring it back;
-> a serial console and the U-Boot prompt did. The documented USB/Maskrom route
-> failed for a reason we could pin down -- with `idbloader`, ATF and U-Boot all
-> intact, the BootROM loads them happily and never presents itself over USB, so
-> a broken *boot partition* never reaches the point where Maskrom would help.
->
-> The parts are certainly present in the U-Boot on this device: the upload page
-> and the `httpd` command (`start web server for firmware recovery`) are in the
-> binary, alongside `tftp`, `dhcp` and `rockusb`. Present is not the same as
-> working when you need it, and this repository does not have evidence for the
-> latter.
->
-> Treat the vendor routes as worth five minutes before you get the soldering
-> iron out, not as the reason you do not need one. If one of them does work for
-> you, please open an issue and say which -- it would be genuinely useful to
-> know.
+> **The vendor recovery routes do not work here.** GL.iNet document a U-Boot
+> web failsafe at `192.168.1.1` (hold Reset while powering on), plus RKDevTool
+> and USB OTG routes. The web one has never worked on this device, and the
+> USB/Maskrom one cannot: with `idbloader`, ATF and U-Boot all intact, the
+> BootROM loads them and never presents itself over USB, so a broken *boot
+> partition* never gets that far. The pieces are in the U-Boot binary -- the
+> upload page and an `httpd` command are both there -- but present is not the
+> same as working, and this is written down so nobody spends an evening on it
+> expecting a rescue. If you do get one of them to work, an issue saying which
+> would be genuinely useful.
 
 ## 1. The device still boots: revert over SSH
 
@@ -63,11 +28,10 @@ scripts/revert-kernel.sh <device-ip> <backup-file>      # restore one
 to go back to. Keep a copy of the untouched vendor image there as well; it is
 the one that always works.
 
-## 2. The device does not boot, and you want your own image back
+## 2. The device does not boot: U-Boot over the serial console
 
-This puts a specific image back rather than restoring stock, so it is what you
-want if option 0 would throw away more than you like. It has been used many
-times here and it works, but it needs the serial console (below).
+This is the one that actually works when things are bad. It has been used many
+times here. It needs the serial console (below).
 
 Interrupt the boot at `Hit key to stop autoboot` with Ctrl-C, then:
 
@@ -109,10 +73,10 @@ diagnostic step you still want a bootable partition behind you.
 
 ## Maskrom does not help here
 
-The vendor documentation describes Maskrom via reset, power and OTG. It does
-not work for a broken boot partition: the BootROM finds idbloader, ATF and
-U-Boot intact, loads them, and never appears on USB. No `2207:` device shows
-up. Maskrom rescues a broken loader, not a broken kernel.
+No `2207:` device appears at the OTG port, because the BootROM never gets that
+far -- see the note at the top. Maskrom rescues a broken loader, not a broken
+kernel. Forcing it would mean pulling an eMMC line to ground while powering on,
+which is a last resort and has not been tried here.
 
 ## Serial console
 

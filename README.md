@@ -13,10 +13,10 @@ patches, and the changes in `patches/`. No vendor binaries are redistributed.
 > Follow the instructions as written. If you skip steps or improvise, you will
 > be recovering the device rather than using it.
 >
-> GL.iNet document a U-Boot web failsafe for this hardware, and it is worth
-> trying first if things go wrong. It did **not** rescue the one device this
-> project actually bricked -- that took a serial console. Plan accordingly:
-> [docs/recovery.md](docs/recovery.md).
+> If the device stops booting, a serial console is what gets it back. The
+> vendor's web and USB recovery routes do not work here -- see
+> [docs/recovery.md](docs/recovery.md) for why, so you do not waste an evening
+> discovering it yourself.
 >
 > Installing the prebuilt kernel is the safe route: it checks your device and
 > firmware, backs the boot partition up and verifies everything it writes.
