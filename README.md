@@ -121,16 +121,19 @@ docs/       build, recovery, the LT6911C driver, the access point
 
 ## Planned
 
-* **Patch GL.iNet's own firmware images.** Right now you build a kernel and
-  install it onto a device that is already running. The nicer path is to take
-  an official OTA image, replace the kernel inside it, and flash the result
-  through the normal update mechanism — no cross toolchain, no SSH surgery, and
-  a familiar way back by simply reinstalling the stock image. The RKFW/RKAF
-  format is already understood well enough to unpack and repack; what is
-  missing is the tooling and a second device to test it on without risking the
-  working one. Note that this will always be a script you run on an image *you*
-  downloaded: a pre-patched image would mean redistributing GL's binaries,
-  which is exactly what we are asking them not to do to us.
+* **A tool to patch a firmware image you downloaded yourself.** Right now you
+  build a kernel and install it onto a running device. The easier path is a
+  script that takes an official OTA image *you* fetched from GL.iNet's download
+  page, replaces the kernel inside it with ours, and hands the result back to
+  you for the normal update mechanism — no cross toolchain, no SSH surgery on a
+  live system, and a familiar way back by reinstalling the stock image.
+
+  To be explicit about what this is and is not: we would ship **the tool, never
+  an image**. Nothing that GL.iNet distributes gets re-distributed by us; the
+  script operates on a file that is already on your machine and produces a
+  result that stays there. The RKFW/RKAF container is understood well enough to
+  unpack and repack; what is missing is the tooling and a second device to test
+  on without risking a working one.
 * **Audio.** The sample rate is still hardcoded to 48 kHz upstream of us
   ([glkvm#136](https://github.com/gl-inet/glkvm/issues/136)); non-48 kHz sources
   come through pitch-shifted. Untouched so far.
@@ -148,6 +151,40 @@ devices and the driver situation is the same everywhere.
 If you have a source that shows a picture on the stock firmware but not here,
 open an issue with `dmesg | grep lt6911` and the output of
 `cat /sys/bus/i2c/devices/1-002b/resolution`.
+
+## Legal
+
+Not legal advice, just the reasoning behind how this repository is put
+together. If it matters to you, ask someone qualified in your jurisdiction.
+
+**Nothing of GL.iNet's is redistributed here.** The patches are our own work
+against their published GPL sources. The kernel we build contains no vendor
+binaries. `build-fit.sh` pulls the board device tree and the Rockchip resource
+blob from *your* device at build time rather than shipping copies, and the
+planned image tool will work the same way: on a file you downloaded yourself.
+
+**Modifying software on hardware you own is a different thing from
+distributing it.** Copyright governs copying and distribution. Changing the
+firmware on your own device — to fix a bug, in this case a capture path that
+does not work — is covered by the rights a lawful acquirer has under Swiss and
+EU law, and those rights cannot be signed away by boilerplate.
+
+**The kernel is GPL-2.0**, and GPLv2 section 6 forbids imposing further
+restrictions on downstream recipients. Whatever a vendor's terms of use say
+about modification, they cannot narrow the licence on the GPL parts — which is
+all we touch.
+
+**No technical protection measure is being circumvented.** Secure boot is not
+active on this device: the boot log reports `Verified-boot: 0`, the U-Boot
+control FDT contains no `/signature` node, and unsigned FIT images with correct
+hashes boot normally. There is nothing here to bypass.
+
+**Your warranty is very likely void** once you write your own kernel to the
+boot partition, and support from the vendor for a modified device is not
+something to count on. That is the trade, and it is yours to make.
+
+**Not affiliated with GL.iNet.** Product and company names are used to say
+which hardware this runs on, nothing more.
 
 ## License
 
