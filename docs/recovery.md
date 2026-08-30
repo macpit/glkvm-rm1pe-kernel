@@ -1,14 +1,17 @@
 # Recovery
 
-Ways back, in order of how much has gone wrong. **Most of them do not need a
-serial console**, which is worth knowing before you start.
+Ways back, in order of how much has gone wrong.
 
-## 0. The vendor's own failsafe: U-Boot web UI
+**Plan for needing the serial console.** The vendor's own failsafe routes are
+documented below and are worth trying first, but the one time this project
+actually bricked a device, they did not get it back -- serial and U-Boot did.
+Do not start on the assumption that a web page will save you.
 
-GL.iNet ships a U-Boot web recovery on this hardware, and it is the first thing
-to reach for if the device no longer boots. It restores stock firmware, so it
-undoes everything in this repository -- which is exactly what you want when you
-are trying to get a working device back.
+## 0. The vendor's failsafe routes: try them, do not count on them
+
+GL.iNet document a U-Boot web recovery for this hardware. It is quick to
+attempt and costs nothing, so it is the first thing to try -- but see the
+caveat at the end of this section before you rely on it.
 
 For the **GL-RM1PE**, from
 [GL's own documentation](https://docs.gl-inet.com/kvm/en/faq/debrick/):
@@ -21,19 +24,32 @@ For the **GL-RM1PE**, from
 5. Open `http://192.168.1.1` -- that is the U-Boot web UI. Choose the firmware
    file and click Update. It takes about three minutes; do not cut the power.
 
-This is a genuine escape hatch: the recovery lives in U-Boot, so it works even
-when the boot partition is unusable. Confirmed present in the U-Boot on this
-device -- the upload page and the `httpd` command (`start web server for
-firmware recovery`) are both in the binary, alongside `tftp`, `dhcp` and
-`rockusb`. **We have not yet had to use it in anger**, so if you do, please say
-how it went in an issue.
-
-GL documents two further routes that also need no serial console:
+GL document two further routes that also need no serial console:
 [RKDevTool](https://docs.gl-inet.com/kvm/en/tutorials/how_to_debrick_kvm_via_rkdevtool/)
 and [USB OTG](https://docs.gl-inet.com/kvm/en/tutorials/how_to_unbrick_kvm_via_usb_otg/).
 
-Note that all three restore the stock image. If you only want your previous
-kernel back and the device still gives you a shell, use option 1 instead.
+All three restore the stock image. If you only want your previous kernel back
+and the device still gives you a shell, use option 1 instead.
+
+> ### The caveat, and it is a real one
+>
+> **This did not work here when it was needed.** The one time a device in this
+> project was left unbootable, the vendor recovery route did not bring it back;
+> a serial console and the U-Boot prompt did. The documented USB/Maskrom route
+> failed for a reason we could pin down -- with `idbloader`, ATF and U-Boot all
+> intact, the BootROM loads them happily and never presents itself over USB, so
+> a broken *boot partition* never reaches the point where Maskrom would help.
+>
+> The parts are certainly present in the U-Boot on this device: the upload page
+> and the `httpd` command (`start web server for firmware recovery`) are in the
+> binary, alongside `tftp`, `dhcp` and `rockusb`. Present is not the same as
+> working when you need it, and this repository does not have evidence for the
+> latter.
+>
+> Treat the vendor routes as worth five minutes before you get the soldering
+> iron out, not as the reason you do not need one. If one of them does work for
+> you, please open an issue and say which -- it would be genuinely useful to
+> know.
 
 ## 1. The device still boots: revert over SSH
 

@@ -13,10 +13,9 @@ patches, and the changes in `patches/`. No vendor binaries are redistributed.
 > Follow the instructions as written. If you skip steps or improvise, you will
 > be recovering the device rather than using it.
 >
-> The good news is that GL.iNet ship a U-Boot web failsafe on this hardware:
-> hold Reset while powering on, set your PC to 192.168.1.2, and flash stock
-> firmware from `http://192.168.1.1`. That works even when the boot partition
-> does not, and it needs no serial console. See
+> GL.iNet document a U-Boot web failsafe for this hardware, and it is worth
+> trying first if things go wrong. It did **not** rescue the one device this
+> project actually bricked -- that took a serial console. Plan accordingly:
 > [docs/recovery.md](docs/recovery.md).
 >
 > Installing the prebuilt kernel is the safe route: it checks your device and
@@ -32,10 +31,11 @@ else's hardware.
 The install and revert paths run on the KVM itself and need nothing else. The
 build route needs a cross toolchain and someone comfortable reading a boot log.
 Either way, both only help while the device still boots far enough for a shell.
-After that, GL's U-Boot web failsafe gets you back to stock firmware without
-opening anything. A serial console is only needed to put a *specific* image
-back instead of stock -- useful if you are developing, not something a user
-needs.
+After that you are into recovery, and the honest answer is that the vendor's
+failsafe routes are worth trying but have not worked here when it mattered. Get
+a serial cable before you start if you do not have one -- on the RM1PE that
+also means opening the case and soldering to the RX pad, which is not broken
+out.
 
 Everything short of that is reversible: the boot partition is backed up and
 verified before anything is written, and put back if the write does not
