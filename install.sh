@@ -44,13 +44,17 @@ PATCHER_FILE="${PATCHER_FILE:-}"
 say()  { printf '%s\n' "$*"; }
 die()  { printf 'install: %s\n' "$*" >&2; exit 1; }
 
+# Piped into a shell, $0 is "sh", so it is useless for telling the user how to
+# run this again. SELF is empty in that case and the messages say so.
+if [ -f "$0" ]; then SELF="sh $0"; else SELF=""; fi
+
 usage() {
     cat <<USAGE
 usage:
-  $0                  install the pinned release kernel ($TAG)
-  $0 --list           list images in $BACKUP_DIR
-  $0 --revert FILE    write FILE back into the boot partition
-  -y, --yes           do not ask for confirmation
+  install.sh                  install the pinned release kernel ($TAG)
+  install.sh --list           list images in $BACKUP_DIR
+  install.sh --revert FILE    write FILE back into the boot partition
+  -y, --yes                   do not ask for confirmation
 
 When piped straight into a shell, pass arguments after -s --, e.g.
   curl -sSL <url> | sh -s -- --list
@@ -186,7 +190,11 @@ An install puts one there before it writes, so there is nothing to roll back to.
         printf '    %10d  %s\n' "$(stat -c%s "$f")" "$f"
     done
     say ""
-    say "Roll back with: $0 --revert <file>"
+    if [ -n "$SELF" ]; then
+        say "Roll back with: $SELF --revert <file>"
+    else
+        say "Roll back with: cat <file> > $BOOT && sync"
+    fi
     exit 0
 fi
 
@@ -271,6 +279,12 @@ fi
 
 epilogue
 say ""
-say "To go back:  $0 --revert $BACKUP"
-say "             (or without this script: cat $BACKUP > $BOOT && sync)"
+if [ -n "$SELF" ]; then
+    say "To go back:  $SELF --revert $BACKUP"
+    say "             (or without this script: cat $BACKUP > $BOOT && sync)"
+else
+    say "To go back:  cat $BACKUP > $BOOT && sync"
+    say "             then power-cycle. Keeping a copy of install.sh on the"
+    say "             device gives you --list and --revert instead."
+fi
 say "If it does not come back, see docs/recovery.md (serial console + U-Boot)."
