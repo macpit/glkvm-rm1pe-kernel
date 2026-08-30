@@ -125,11 +125,23 @@ the KVM itself:
 curl -sSL https://raw.githubusercontent.com/macpit/glkvm-rm1pe-kernel/main/install.sh | sh
 ```
 
-It checks the model, downloads the release kernel and `scripts/patch-fit.py`
-and verifies both against checksums pinned in the script, swaps the kernel
-inside the FIT already in your boot partition, backs that partition up, writes,
-and reads back to compare. It never reboots, and it restores the backup by
-itself if the read-back does not match.
+Before it touches anything it makes sure this is the right device and a
+firmware we have actually run on:
+
+* the model has to agree across three independent sources -- `gl-hw-info`,
+  `RK_MODEL` in `/etc/version`, and the device tree
+* the stock firmware version has to be one we have tested. Anything else is
+  refused with a pointer to open an issue, because the boot partition layout
+  and `S23hdmi` are what this keys off and neither is guaranteed across
+  GL.iNet releases
+* the boot partition has to already contain a FIT we can read
+* and it asks you to type `yes` before writing (`--yes` skips it)
+
+Then it downloads the release kernel and `scripts/patch-fit.py` and verifies
+both against checksums pinned in the script, swaps the kernel inside the FIT
+already in your boot partition, backs that partition up, writes, and reads back
+to compare. It never reboots, and it restores the backup by itself if the
+read-back does not match.
 
 The same script rolls back, which is why it is worth keeping on the device
 rather than piping it -- a rollback then needs no network:
@@ -139,8 +151,15 @@ sh install.sh --list                                   # what you can go back to
 sh install.sh --revert /userdata/kernel-backup/boot-backup-....img
 ```
 
+Piped straight into a shell, arguments go after `-s --`:
+
+```sh
+curl -sSL https://raw.githubusercontent.com/macpit/glkvm-rm1pe-kernel/main/install.sh | sh -s -- --list
+```
+
 > **This overwrites a boot partition from a shell pipeline.** Read the script
-> before you run it -- it is under 200 lines and does nothing clever. `curl | sh`
+> before you run it -- it is a few hundred lines and does nothing clever.
+> `curl | sh`
 > means trusting GitHub to serve you the right file; the script cannot verify
 > itself, only what it downloads afterwards. If that trade is not acceptable,
 > download it, read it, then run it. The safer path is still the build route

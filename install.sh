@@ -23,6 +23,13 @@ KERNEL_NAME="Image-6.1.141-${TAG}"
 KERNEL_SHA="d96cd811f8cf3888a5185b9c69f5e379f36888527584842a0135092a850581fd"
 PATCHER_SHA="4ed17024287a457625a20fa4c42848feade06baa5e6b7006ca0b238e8dc47c4e"
 
+ISSUES="https://github.com/${REPO}/issues"
+
+# Stock firmware versions this has actually been run on. Anything else is
+# refused: the boot partition layout and /etc/init.d/S23hdmi are what we key
+# off, and neither is guaranteed across GL.iNet releases.
+TESTED_FIRMWARE="V1.9.1 release1"
+
 REL="https://github.com/${REPO}/releases/download/${TAG}"
 RAW="https://raw.githubusercontent.com/${REPO}/main"
 BOOT="/dev/block/by-name/boot"
@@ -43,25 +50,97 @@ usage:
   $0                  install the pinned release kernel ($TAG)
   $0 --list           list images in $BACKUP_DIR
   $0 --revert FILE    write FILE back into the boot partition
+  -y, --yes           do not ask for confirmation
+
+When piped straight into a shell, pass arguments after -s --, e.g.
+  curl -sSL <url> | sh -s -- --list
 USAGE
 }
 
 MODE=install
 PICK=""
-case "${1:-}" in
-    "")          ;;
-    --list)      MODE=list ;;
-    --revert)    MODE=revert; PICK="${2:-}"
-                 [ -n "$PICK" ] || die "--revert needs a file; try --list" ;;
-    -h|--help)   usage; exit 0 ;;
-    *)           usage >&2; exit 1 ;;
-esac
+ASSUME_YES=0
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --list)      MODE=list ;;
+        --revert)    MODE=revert; PICK="${2:-}"; shift
+                     [ -n "$PICK" ] || die "--revert needs a file; try --list" ;;
+        -y|--yes)    ASSUME_YES=1 ;;
+        -h|--help)   usage; exit 0 ;;
+        *)           usage >&2; exit 1 ;;
+    esac
+    shift
+done
+
+# Piped into a shell, stdin is the script itself, so the prompt has to come
+# from the terminal directly.
+confirm() {
+    [ "$ASSUME_YES" = 1 ] && return 0
+    # Two traps here. Testing -r is not enough: /dev/tty exists and looks
+    # readable even with no controlling terminal, and only opening it fails.
+    # And the open has to happen in a subshell -- a failed redirection on a
+    # compound command terminates a non-interactive shell outright, so the
+    # obvious { : < /dev/tty; } would exit silently instead of taking the
+    # else branch.
+    if ( exec < /dev/tty ) 2>/dev/null; then
+        printf 'Type yes to continue: '
+        read -r _reply < /dev/tty || _reply=""
+        [ "$_reply" = "yes" ] || die "aborted, nothing written"
+    else
+        die "no terminal to confirm on (running non-interactively?).
+Re-run with --yes if you are sure, or run it from a shell on the device."
+    fi
+}
 
 # ---------------------------------------------------------------- device check
 [ "$(id -u)" = 0 ] || die "must run as root"
-MODEL=$(cat /proc/gl-hw-info/model 2>/dev/null || echo unknown)
-[ "$MODEL" = "rm1pe" ] || die "this device reports model '$MODEL', not 'rm1pe'. Refusing.
-Everything here is built for the GL-RM1PE (Comet PoE) only."
+
+# Three independent sources, because one of them being right by accident is
+# not the same as being on the right device. gl-hw-info is a kernel module and
+# can be absent; /etc/version is the vendor's own record; the device tree comes
+# from the boot partition itself.
+GL_MODEL=$(cat /proc/gl-hw-info/model 2>/dev/null || echo "")
+RK_MODEL=$(sed -n 's/^RK_MODEL=//p' /etc/version 2>/dev/null | head -1)
+DT_MODEL=$(tr -d '\0' < /proc/device-tree/model 2>/dev/null || echo "")
+RK_VERSION=$(sed -n 's/^RK_VERSION=//p' /etc/version 2>/dev/null | head -1)
+
+wrong_device() {
+    die "this does not look like a GL-RM1PE (Comet PoE), and $1.
+
+    /proc/gl-hw-info/model   ${GL_MODEL:-<missing>}     expected rm1pe
+    RK_MODEL in /etc/version ${RK_MODEL:-<missing>}     expected RM1PE
+    /proc/device-tree/model  ${DT_MODEL:-<missing>}     expected to contain RV1126B-P
+
+Everything in this repository is built for the RM1PE only. A kernel for the
+wrong board will not boot, and on this hardware that means a serial console
+and a soldering iron to get back.
+
+If you believe this IS an RM1PE, please open an issue with the three lines
+above: $ISSUES"
+}
+
+[ "$GL_MODEL" = "rm1pe" ] || wrong_device "the model does not match"
+[ "$RK_MODEL" = "RM1PE" ] || wrong_device "the vendor version file disagrees"
+case "$DT_MODEL" in *RV1126B-P*) ;; *) wrong_device "the device tree disagrees" ;; esac
+
+# Only refuse on firmware we have not seen. The list is short on purpose.
+printf '%s\n' "$TESTED_FIRMWARE" | grep -Fxq "$RK_VERSION" || die \
+"this device runs stock firmware '${RK_VERSION:-<unknown>}', which has not been
+tested with this kernel. Tested so far:
+
+$(printf '    %s\n' "$TESTED_FIRMWARE")
+
+Refusing rather than guessing. What we rely on -- the FIT layout of the boot
+partition and /etc/init.d/S23hdmi -- is not guaranteed to be the same across
+GL.iNet releases, and getting it wrong costs you a serial console.
+
+Please open an issue with the output of:
+
+    cat /etc/version
+    cat /proc/gl-hw-info/model
+
+at $ISSUES and we will check that firmware. It is usually a quick answer."
+
 [ -b "$BOOT" ] || die "no boot partition at $BOOT"
 PART_BYTES=$(( $(cat "/sys/class/block/$(basename "$(readlink -f "$BOOT")")/size") * 512 ))
 
@@ -115,6 +194,9 @@ fi
 if [ "$MODE" = revert ]; then
     [ -f "$PICK" ] || die "no such file: $PICK"
     [ -s "$PICK" ] || die "$PICK is empty"
+    say "About to overwrite the boot partition of this device with"
+    say "  $PICK"
+    confirm
     say "==> reverting to $PICK"
     write_and_verify "$PICK" "$PICK" || die "write verification failed.
 The partition is now in an unknown state. Do not power-cycle. Retry, or use
@@ -126,7 +208,9 @@ fi
 # --------------------------------------------------------------------- install
 say "==> checking the device"
 command -v python3 >/dev/null || die "python3 not found"
-say "    model rm1pe, boot partition $PART_BYTES bytes"
+is_fit "$BOOT" || die "the boot partition does not start with the FIT magic.
+This is not a layout we know how to patch. Please open an issue at $ISSUES"
+say "    RM1PE, stock firmware $RK_VERSION, boot partition $PART_BYTES bytes"
 
 FREE_KB=$(df -P /userdata | awk 'NR==2 {print $4}')
 [ "$FREE_KB" -ge "$NEED_KB" ] || die "only ${FREE_KB} kB free on /userdata, need ${NEED_KB} kB"
@@ -167,6 +251,11 @@ python3 "$WORK/patch-fit.py" "$BOOT" "$WORK/kernel" "$WORK/new.img" \
 NEW_BYTES=$(stat -c%s "$WORK/new.img")
 [ "$NEW_BYTES" -le "$PART_BYTES" ] \
     || die "new image is $NEW_BYTES bytes, larger than the $PART_BYTES byte partition"
+
+say ""
+say "About to overwrite the boot partition of this device with kernel $TAG."
+say "A backup of the current partition is written first, and nothing reboots."
+confirm
 
 STAMP=$(date +%Y%m%d-%H%M%S)
 BACKUP="$BACKUP_DIR/boot-backup-$STAMP.img"

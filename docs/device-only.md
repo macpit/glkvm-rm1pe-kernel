@@ -24,7 +24,7 @@ The IP is the one the KVM's web interface is on.
 ```sh
 cd /userdata
 curl -sSLo install.sh https://raw.githubusercontent.com/macpit/glkvm-rm1pe-kernel/main/install.sh
-less install.sh          # it is ~190 lines, and it overwrites a boot partition
+less install.sh          # a few hundred lines, and it overwrites a boot partition
 ```
 
 Keeping the file rather than piping it matters: **rolling back later then needs
@@ -36,11 +36,26 @@ no network**, which is exactly the situation you are in if something went wrong.
 sh install.sh
 ```
 
-It checks the model, downloads the release kernel and `patch-fit.py` and
-verifies both against checksums pinned in the script, swaps the kernel inside
-the FIT already in your boot partition, backs that partition up, writes, and
-reads back to compare. If the read-back disagrees it puts the backup straight
-back. It never reboots.
+It refuses to do anything unless all of this holds:
+
+| Check | Why |
+| --- | --- |
+| `gl-hw-info`, `RK_MODEL` and the device tree all say RM1PE | one source being right by accident is not the same as being on the right board |
+| stock firmware is a version we have tested | the FIT layout and `S23hdmi` are what this keys off, and GL.iNet does not promise those stay put |
+| the boot partition already holds a readable FIT | otherwise there is nothing to patch |
+| you type `yes` | `--yes` skips it |
+
+A kernel for the wrong board does not boot, and on this hardware that costs you
+a serial console and a soldering iron. Hence the paranoia.
+
+If your firmware is not on the tested list the script says so and asks you to
+open an issue with the output of `cat /etc/version`. That is not a brush-off --
+it is usually a quick answer, and it is how the list grows.
+
+Then it downloads the release kernel and `patch-fit.py`, verifies both against
+checksums pinned in the script, swaps the kernel inside the FIT already in your
+boot partition, backs that partition up, writes, and reads back to compare. If
+the read-back disagrees it puts the backup straight back. It never reboots.
 
 Your device tree and the Rockchip resource blob are not touched -- only the
 kernel payload inside the FIT is replaced. Nothing proprietary is downloaded.
