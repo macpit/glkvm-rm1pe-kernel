@@ -5,16 +5,40 @@ Ways back, in order of how much has gone wrong.
 **Plan for needing the serial console.** If the device stops booting, that is
 what gets it back. Do not start on the assumption that something easier will.
 
-> **The vendor recovery routes do not work here.** GL.iNet document a U-Boot
-> web failsafe at `192.168.1.1` (hold Reset while powering on), plus RKDevTool
-> and USB OTG routes. The web one has never worked on this device, and the
-> USB/Maskrom one cannot: with `idbloader`, ATF and U-Boot all intact, the
-> BootROM loads them and never presents itself over USB, so a broken *boot
-> partition* never gets that far. The pieces are in the U-Boot binary -- the
-> upload page and an `httpd` command are both there -- but present is not the
-> same as working, and this is written down so nobody spends an evening on it
-> expecting a rescue. If you do get one of them to work, an issue saying which
-> would be genuinely useful.
+> **The vendor recovery routes do not work here, and it is worth knowing why.**
+>
+> GL.iNet document a U-Boot web failsafe at `192.168.1.1` -- hold Reset while
+> powering on, wait for the blue LED to flash five times, release. It has never
+> worked on this device. When one was actually left unbootable, the LED did not
+> come on at all, so there was no signal to act on and no way to tell whether
+> the mode had been entered. Recovery meant a serial console.
+>
+> Two things on this board explain it:
+>
+> * **The LED is not U-Boot's to drive.** It is run by a userspace daemon,
+>   `/usr/sbin/led_event_controller`, started from `/etc/init.d/S23led` over
+>   sysfs GPIOs. There is no LED node in the kernel device tree, nothing under
+>   `/sys/class/leds`, and no LED node in U-Boot's control FDT. So the flashing
+>   pattern the procedure asks you to wait for can only come from a booted
+>   Linux -- exactly what you do not have when you need this.
+> * **U-Boot is probably not seeing the button.** The only key in U-Boot's
+>   device tree is an `adc-keys` "volume up" on the SARADC. The physical button
+>   is `gpio-keys` `KEY_RST` on a GPIO. Holding Reset most likely never reaches
+>   U-Boot's download-key check at all.
+>
+> U-Boot's control FDT also has no Ethernet controller, only mmc, serial, GPIO,
+> SARADC and the USB2 phy -- which would leave `httpd` with no interface to
+> bind to. That FDT may be a trimmed pre-relocation tree, so treat that last
+> point as supporting evidence rather than proof.
+>
+> The USB/Maskrom route fails for a separate and simpler reason: with
+> `idbloader`, ATF and U-Boot all intact, the BootROM loads them and never
+> presents itself over USB, so a broken *boot partition* never gets that far.
+>
+> The pieces really are in the U-Boot binary -- the upload page and an `httpd`
+> command (`start web server for firmware recovery`) are both there. Present is
+> not the same as reachable. If you do get one of these routes to work on your
+> unit, please open an issue and say which; it would change this page.
 
 ## 1. The device still boots: revert over SSH
 
