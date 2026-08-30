@@ -95,6 +95,10 @@ echo "==> packing the FIT"
 # -E keeps the payloads outside the header, -p places them at 0x800, matching
 # the original layout. A FIT with embedded data is NOT accepted by this
 # U-Boot: it fails with "FIT: No fit blob".
+#
+# mkimage stamps the header with the current time, which is the only thing that
+# differs between two builds of the same inputs. Set SOURCE_DATE_EPOCH to pin
+# it and the output becomes reproducible byte for byte.
 ( cd "$WORK" && mkimage -f boot.its -E -p 0x800 -B 0x200 out.img >/dev/null )
 
 fdtget -p "$WORK/out.img" /images/kernel | grep -q data-position || {
@@ -105,5 +109,10 @@ echo
 echo "    $OUT"
 echo "    $(stat -c%s "$OUT") bytes"
 echo "    $(sha256sum "$OUT" | cut -d' ' -f1)"
+if [ -z "${SOURCE_DATE_EPOCH:-}" ]; then
+    echo
+    echo "    (the header carries a build timestamp, so two runs of this script"
+    echo "     differ in three bytes. Set SOURCE_DATE_EPOCH to pin it.)"
+fi
 echo
 echo "Next: scripts/install-kernel.sh $DEV $OUT"

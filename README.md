@@ -51,10 +51,22 @@ before it writes, `revert-kernel.sh` puts it back.
 
 Tested on GL-RM1PE with firmware V1.9.1 release1, kernel 6.1.141.
 
+## Two ways in
+
+**Just run the kernel.** Everything happens in a shell on the KVM: no build
+machine, no toolchain, no SSH from anywhere else. Install and roll back are both
+covered in [docs/device-only.md](docs/device-only.md), and the short version is
+the [one-liner](#install-without-building) below.
+
+**Change the kernel.** Then you need a build machine.
+[docs/dev-machine.md](docs/dev-machine.md) lists exactly what to install on a
+Debian 12 box, and the quick start below is the build itself.
+
 ## Quick start
 
 You need a build machine with an aarch64 cross toolchain, `u-boot-tools` and
-`device-tree-compiler`, plus SSH access to the KVM.
+`device-tree-compiler`, plus SSH access to the KVM. Full package list and setup:
+[docs/dev-machine.md](docs/dev-machine.md).
 
 The scripts in `scripts/` run on that build machine, not on the KVM: they call
 `mkimage` and `fdtget`, which the device does not have. They also assume
@@ -96,6 +108,14 @@ scripts/revert-kernel.sh 192.168.1.10 /userdata/kernel-backup/boot-backup-....im
 `install-kernel.sh` backs up the running boot partition before it writes, so
 the way back exists from the first run onwards.
 
+`mkimage` stamps the FIT header with the build time, so two runs over the same
+inputs differ in three bytes. Set `SOURCE_DATE_EPOCH` to pin it and the output
+is reproducible byte for byte:
+
+```sh
+SOURCE_DATE_EPOCH=1788075901 scripts/build-fit.sh 192.168.1.10 ../build/arch/arm64/boot/Image out.img
+```
+
 ## Install without building
 
 If you only want the release kernel and not a build environment, this runs on
@@ -111,12 +131,23 @@ inside the FIT already in your boot partition, backs that partition up, writes,
 and reads back to compare. It never reboots, and it restores the backup by
 itself if the read-back does not match.
 
+The same script rolls back, which is why it is worth keeping on the device
+rather than piping it -- a rollback then needs no network:
+
+```sh
+sh install.sh --list                                   # what you can go back to
+sh install.sh --revert /userdata/kernel-backup/boot-backup-....img
+```
+
 > **This overwrites a boot partition from a shell pipeline.** Read the script
-> before you run it -- it is 110 lines and does nothing clever. `curl | sh`
+> before you run it -- it is under 200 lines and does nothing clever. `curl | sh`
 > means trusting GitHub to serve you the right file; the script cannot verify
 > itself, only what it downloads afterwards. If that trade is not acceptable,
 > download it, read it, then run it. The safer path is still the build route
 > above with a serial console attached.
+
+The full walkthrough, including what this route cannot rescue you from, is in
+[docs/device-only.md](docs/device-only.md).
 
 Nothing proprietary is downloaded: your device tree and the Rockchip resource
 blob stay in place, only the kernel payload is replaced. The way back is
@@ -160,7 +191,8 @@ patches/    the four patches, in order
 scripts/    build the FIT, install it, roll it back -- all over SSH
             patch-fit.py swaps the kernel inside an existing FIT, on the device
 wlan-ap/    access point and captive portal, ready to drop into /userdata
-docs/       build, recovery, the LT6911C driver, the access point
+docs/       dev-machine, device-only, build, recovery, the LT6911C driver,
+            the access point
 ```
 
 ## Planned

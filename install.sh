@@ -1,12 +1,18 @@
 #!/bin/sh
-# Install a prebuilt kernel into the boot partition of a GL-RM1PE.
+# Install, list and roll back kernels on a GL-RM1PE, from the device itself.
 #
-# Runs ON THE DEVICE:
-#     curl -sSL https://raw.githubusercontent.com/macpit/glkvm-rm1pe-kernel/main/install.sh | sh
+# No build machine, no cross toolchain, no SSH from elsewhere. Fetch it once
+# and keep it, so rolling back later needs no network:
 #
-# It backs up the current boot partition, swaps the kernel inside the existing
-# FIT (keeping YOUR device tree and resource blob), writes it back and verifies
-# the result. It never reboots. Every failure aborts before anything is written.
+#     curl -sSLo install.sh https://raw.githubusercontent.com/macpit/glkvm-rm1pe-kernel/main/install.sh
+#     sh install.sh                  # install the pinned release kernel
+#     sh install.sh --list           # what can be rolled back to
+#     sh install.sh --revert FILE    # put one of those back
+#
+# It swaps the kernel inside the FIT already in your boot partition, keeping
+# your device tree and the Rockchip resource blob. It backs the partition up
+# before writing, verifies by reading back, and restores the backup itself if
+# that fails. It never reboots.
 #
 # Read this before piping it into a shell. It overwrites a boot partition.
 set -eu
@@ -24,22 +30,102 @@ BACKUP_DIR="/userdata/kernel-backup"
 WORK="/userdata/.glkvm-install"
 NEED_KB=81920                      # kernel + patched image + 32 MiB backup
 
-say()  { printf '%s\n' "$*"; }
-die()  { printf 'install: %s\n' "$*" >&2; exit 1; }
-
 # Offline / testing: point these at local files to skip the downloads.
 KERNEL_FILE="${KERNEL_FILE:-}"
 PATCHER_FILE="${PATCHER_FILE:-}"
 
-[ "$(id -u)" = 0 ] || die "must run as root"
+say()  { printf '%s\n' "$*"; }
+die()  { printf 'install: %s\n' "$*" >&2; exit 1; }
 
-say "==> checking the device"
+usage() {
+    cat <<USAGE
+usage:
+  $0                  install the pinned release kernel ($TAG)
+  $0 --list           list images in $BACKUP_DIR
+  $0 --revert FILE    write FILE back into the boot partition
+USAGE
+}
+
+MODE=install
+PICK=""
+case "${1:-}" in
+    "")          ;;
+    --list)      MODE=list ;;
+    --revert)    MODE=revert; PICK="${2:-}"
+                 [ -n "$PICK" ] || die "--revert needs a file; try --list" ;;
+    -h|--help)   usage; exit 0 ;;
+    *)           usage >&2; exit 1 ;;
+esac
+
+# ---------------------------------------------------------------- device check
+[ "$(id -u)" = 0 ] || die "must run as root"
 MODEL=$(cat /proc/gl-hw-info/model 2>/dev/null || echo unknown)
 [ "$MODEL" = "rm1pe" ] || die "this device reports model '$MODEL', not 'rm1pe'. Refusing.
 Everything here is built for the GL-RM1PE (Comet PoE) only."
 [ -b "$BOOT" ] || die "no boot partition at $BOOT"
-command -v python3 >/dev/null || die "python3 not found"
 PART_BYTES=$(( $(cat "/sys/class/block/$(basename "$(readlink -f "$BOOT")")/size") * 512 ))
+
+# A FIT starts with the flattened-device-tree magic. Anything else in the boot
+# partition would not boot, so refuse to write it.
+is_fit() {
+    [ "$(od -An -tx1 -N4 "$1" | tr -d ' \n')" = "d00dfeed" ]
+}
+
+write_and_verify() {  # write_and_verify <file> <label>
+    _size=$(stat -c%s "$1")
+    _sha=$(sha256sum "$1" | cut -d' ' -f1)
+    [ "$_size" -le "$PART_BYTES" ] \
+        || die "$2 is $_size bytes, larger than the $PART_BYTES byte partition"
+    is_fit "$1" || die "$2 does not start with the FIT magic; refusing to write it"
+    say "==> writing"
+    cat "$1" > "$BOOT"
+    sync
+    sleep 1
+    _back=$(head -c "$_size" "$BOOT" | sha256sum | cut -d' ' -f1)
+    [ "$_back" = "$_sha" ] || return 1
+    say ""
+    say "    written and verified: $_sha"
+    return 0
+}
+
+epilogue() {
+    say ""
+    say "The device still runs the old kernel from RAM. Nothing has rebooted."
+    say "Power-cycle it when you are ready -- pull the power rather than"
+    say "rebooting warm, since only a cold start exercises the HDMI bridge."
+}
+
+# ------------------------------------------------------------------------ list
+if [ "$MODE" = list ]; then
+    # boot-*.img, not just boot-backup-*.img: images put there by hand are just
+    # as valid a target.
+    found=$(ls -1t "$BACKUP_DIR"/boot-*.img 2>/dev/null || true)
+    [ -n "$found" ] || die "no images in $BACKUP_DIR yet.
+An install puts one there before it writes, so there is nothing to roll back to."
+    say "Images in $BACKUP_DIR, newest first:"
+    for f in $found; do
+        printf '    %10d  %s\n' "$(stat -c%s "$f")" "$f"
+    done
+    say ""
+    say "Roll back with: $0 --revert <file>"
+    exit 0
+fi
+
+# ---------------------------------------------------------------------- revert
+if [ "$MODE" = revert ]; then
+    [ -f "$PICK" ] || die "no such file: $PICK"
+    [ -s "$PICK" ] || die "$PICK is empty"
+    say "==> reverting to $PICK"
+    write_and_verify "$PICK" "$PICK" || die "write verification failed.
+The partition is now in an unknown state. Do not power-cycle. Retry, or use
+the U-Boot route in docs/recovery.md with a serial console."
+    epilogue
+    exit 0
+fi
+
+# --------------------------------------------------------------------- install
+say "==> checking the device"
+command -v python3 >/dev/null || die "python3 not found"
 say "    model rm1pe, boot partition $PART_BYTES bytes"
 
 FREE_KB=$(df -P /userdata | awk 'NR==2 {print $4}')
@@ -74,13 +160,13 @@ else
 fi
 say "    checksums ok"
 
+# Build first: nothing is written anywhere until the image is known good.
 say "==> building the new image"
 python3 "$WORK/patch-fit.py" "$BOOT" "$WORK/kernel" "$WORK/new.img" \
     || die "patching failed, nothing written"
 NEW_BYTES=$(stat -c%s "$WORK/new.img")
 [ "$NEW_BYTES" -le "$PART_BYTES" ] \
     || die "new image is $NEW_BYTES bytes, larger than the $PART_BYTES byte partition"
-NEW_SHA=$(sha256sum "$WORK/new.img" | cut -d' ' -f1)
 
 STAMP=$(date +%Y%m%d-%H%M%S)
 BACKUP="$BACKUP_DIR/boot-backup-$STAMP.img"
@@ -88,23 +174,14 @@ say "==> backing up the current boot partition to $BACKUP"
 cat "$BOOT" > "$BACKUP"
 [ "$(stat -c%s "$BACKUP")" = "$PART_BYTES" ] || die "backup is short, aborting"
 
-say "==> writing"
-cat "$WORK/new.img" > "$BOOT"
-sync
-sleep 1
-BACK=$(head -c "$NEW_BYTES" "$BOOT" | sha256sum | cut -d' ' -f1)
-if [ "$BACK" != "$NEW_SHA" ]; then
+if ! write_and_verify "$WORK/new.img" "the new image"; then
     say "    MISMATCH after write, restoring the backup"
     cat "$BACKUP" > "$BOOT"; sync
     die "write verification failed; the old partition has been restored"
 fi
 
+epilogue
 say ""
-say "    written and verified: $NEW_SHA"
-say ""
-say "The device still runs the old kernel from RAM. Nothing has rebooted."
-say "Power-cycle it when you are ready -- pull the power rather than rebooting"
-say "warm, since only a cold start exercises the HDMI bridge properly."
-say ""
-say "To go back:  cat $BACKUP > $BOOT && sync"
+say "To go back:  $0 --revert $BACKUP"
+say "             (or without this script: cat $BACKUP > $BOOT && sync)"
 say "If it does not come back, see docs/recovery.md (serial console + U-Boot)."
