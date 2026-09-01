@@ -50,6 +50,7 @@ verify.
 | Cold start | Picture is up ~90 ms after the driver probes, without any manual step |
 | USB WLAN | Realtek RTL8188EU (`0bda:8179`), station and access point |
 | Access point | hostapd + dnsmasq + a captive portal that shows the KVM address |
+| Client mode | Join an existing WLAN, with a menu to switch and a watchdog that puts the AP back if it fails |
 | Vendor modules | All six load: `kmpp`, `kmpp_smart`, `rockit*`, `gl-hw-info` |
 | Streaming | Unchanged: kvmd, ustreamer, WebRTC over the vendor pipeline |
 
@@ -166,6 +167,13 @@ Then it downloads the release kernel and `scripts/patch-fit.py` and verifies
 both against checksums pinned in the script, and swaps the kernel inside the
 FIT already in your boot partition.
 
+It also installs the WLAN helper into `/userdata/wlan-ap/`: the menu, the mode
+switcher and a static `wpa_supplicant`. The kernel is what makes a USB WLAN
+stick work, and without those files you can only run an access point with it.
+That step is additive -- an existing `hostapd.conf` is never touched, and an
+`ap-start.sh` that is not byte-for-byte one of ours is left alone -- and a
+failure there does not affect the kernel. `--no-wlan` skips it entirely.
+
 Nothing is written until that image exists and is checked. The FIT already in
 your partition has to match its own recorded checksums before its device tree
 and resource blob are reused -- a damaged partition is refused rather than
@@ -245,9 +253,11 @@ install.sh  one-line installer, runs on the device itself
 patches/    the four patches, in order
 scripts/    build the FIT, install it, roll it back -- all over SSH
             patch-fit.py swaps the kernel inside an existing FIT, on the device
-wlan-ap/    access point and captive portal, ready to drop into /userdata
+            build-wpa-supplicant.sh cross-builds the static wpa_supplicant
+wlan-ap/    access point, client mode and captive portal, ready to drop into
+            /userdata -- wlan-menu.py is the thing you actually run
 docs/       dev-machine, device-only, build, recovery, the LT6911C driver,
-            the access point
+            WLAN
 ```
 
 ## Planned
@@ -287,7 +297,14 @@ open an issue with `dmesg | grep lt6911` and the output of
 I am not a lawyer. This is how the repository is put together and why.
 
 No GL.iNet binaries are redistributed here. The patches are written against
-their published GPL sources. `build-fit.sh` reads the device tree and the
+their published GPL sources.
+
+The release does contain one binary we built ourselves: a static
+`wpa_supplicant` 2.11 (BSD-3-Clause) linked against libnl (LGPL-2.1) and glibc.
+Static linking against an LGPL library carries a relinking obligation, so
+`scripts/build-wpa-supplicant.sh` is in the tree with the exact versions,
+checksums and flags. Anyone can reproduce the binary or build a different one
+and drop it in. Nobody has to take the shipped one. `build-fit.sh` reads the device tree and the
 Rockchip resource blob off your own device instead of shipping copies, and the
 planned image tool will work on a file you downloaded yourself.
 

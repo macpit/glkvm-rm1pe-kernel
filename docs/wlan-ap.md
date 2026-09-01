@@ -1,9 +1,16 @@
-# WLAN access point
+# WLAN
 
 The RM1PE has a USB port and no wireless of its own. With the kernel from this
-repository and a supported stick it can run as an access point, so you can
-reach the KVM without touching the network it is plugged into. Useful when the
-machine you are rescuing *is* the router.
+repository and a supported stick it does both halves of the job: it can run as
+an **access point**, so you can reach the KVM without touching the network it
+is plugged into, and it can join an existing network as a **client**, so the
+KVM is on your WLAN with no cable at all.
+
+The access point is useful when the machine you are rescuing *is* the router.
+Client mode is what most people asked for after the first release: a KVM that
+sits on the shelf and is reachable over the house network.
+
+`wlan-menu.py` switches between the two.
 
 ## The stick we use
 
@@ -50,13 +57,17 @@ Files in `wlan-ap/`, meant to be copied to `/userdata/wlan-ap/` on the device.
 rootfs ships neither.
 
 ```
-ap-start.sh        loads the driver, brings up wlan0, starts everything
+ap-start.sh        entry point under its old name; execs wlan-apply.sh
+wlan-apply.sh      brings wlan0 into the mode recorded in ./mode
+wlan-menu.py       the menu: scan, join, switch back, rename, change the key
 hostapd.conf.example   copy to hostapd.conf and set your own SSID and passphrase
 dnsmasq.conf       DHCP, wildcard DNS, captive-portal options
 captive.py         the state service behind the portal
 portal/index.html  the page itself
 nginx-ap-block.conf    the two server blocks to add to nginx
 restart-cap.sh     restart the state service
+wpa_supplicant     static aarch64 build, not in the repository -- see below
+wpa_cli            same, optional, for debugging a link
 ```
 
 The AP lives on `192.192.193.1/24` and hands out `.100` to `.150`.
@@ -75,6 +86,93 @@ contents are read from the overlay at execution time.
 
 **Overlay-only init scripts never start on their own on this device.** Anything
 you add needs the same treatment.
+
+## Client mode
+
+`wlan-apply.sh` reads `/userdata/wlan-ap/mode`, which holds `ap` or `client`,
+and brings `wlan0` up accordingly. With no mode file it starts the access
+point, which is what the device did before any of this existed. `wlan-menu.py`
+writes that file and re-runs the script; nothing else needs to know.
+
+### wpa_supplicant
+
+Client mode needs `wpa_supplicant`, and the RM1PE rootfs does not have one.
+There are two ways to get it and neither is better than the other:
+
+* **Take the one from the release.** `install.sh` puts it in
+  `/userdata/wlan-ap/` along with the menu, verified against a checksum pinned
+  in the script. Nothing to build.
+* **Build it yourself.** `scripts/build-wpa-supplicant.sh` produces exactly the
+  same thing on a Debian 12 box with the cross toolchain from
+  [dev-machine.md](dev-machine.md):
+
+  ```sh
+  scripts/build-wpa-supplicant.sh out-wpa
+  scp out-wpa/wpa_supplicant out-wpa/wpa_cli root@<device>:/userdata/wlan-ap/
+  ```
+
+It is wpa_supplicant 2.11, statically linked against libnl 3.7.0, built with
+`CONFIG_TLS=internal` and no EAP. That drops the entire TLS and PKI stack,
+which is what makes a static binary reasonable here -- WPA2 and WPA3 personal
+need none of it. If you want EAP for an enterprise network, you want a
+different build, and then you also want OpenSSL cross-compiled.
+
+Static because the rootfs has no libnl and no package manager, and because a
+missing shared object on a device whose only other link is a WLAN switch that
+just failed is an unpleasant way to spend an evening.
+
+### The menu
+
+```sh
+/userdata/wlan-ap/wlan-menu.py
+```
+
+Plain curses, so it works over SSH and over the serial console. The header
+shows the mode, what `wlan0` currently has, and whether `eth0` is up -- that
+last line is not decoration. It tells you whether a failed switch can lock you
+out, and the confirmation prompt before switching says so in as many words.
+
+Five actions: scan and join, enter an SSID by hand for a hidden network, switch
+back to the access point (or restart it, if that is where you already are),
+change the hostname, and change the AP's SSID and passphrase.
+
+Two things behave differently than you might expect, both on purpose:
+
+* **Scanning stops the access point.** One radio cannot serve an AP and scan at
+  the same time. The menu asks first rather than doing it quietly, because
+  anyone connected over the AP loses the link for the duration.
+* **Scanning works without `wpa_supplicant`.** Only joining needs it. If the
+  binary is missing you can still see what is in range, and the message says
+  what to do about it.
+
+### The watchdog
+
+Switching to client mode from a session over the access point kills that
+session mid-switch. `wlan-apply.sh` is therefore started detached and finishes
+regardless. If association does not happen within 45 seconds, or DHCP does not
+produce a lease within 15, it puts `mode` back to `ap` and brings the access
+point up again by itself. Worst case you wait about a minute and the SSID is
+back.
+
+That is the whole safety story for a device with no wired link. With `eth0`
+plugged in you have a way in either way, and the menu tells you which situation
+you are in.
+
+### An nginx trap that turned out not to be one
+
+`nginx-ap-block.conf` binds `listen 192.192.193.1:80`, and in client mode that
+address does not exist. The obvious worry is that nginx then refuses to start
+at boot, taking the web interface down over Ethernet as well.
+
+Measured, it does not happen: as long as a generic `listen 80` sits next to it
+on the same port, nginx never opens a socket for the specific address at all.
+It binds the wildcard once and picks the server block by the local address of
+the accepted connection. A second instance was started with the address
+deliberately absent and came up fine.
+
+It would become real if you removed the generic block or added `bind`.
+`wlan-apply.sh` sets `net.ipv4.ip_nonlocal_bind=1` on every run to cover that
+case. It costs nothing and it is one fewer thing to remember.
 
 ## Captive portal
 
