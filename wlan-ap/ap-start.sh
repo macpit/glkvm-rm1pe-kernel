@@ -1,12 +1,8 @@
 #!/bin/sh
-D=/userdata/wlan-ap
-lsmod | grep -q "^8188eu" || insmod /userdata/wlan-modules/8188eu.ko
-sleep 2
-ip link set wlan0 down 2>/dev/null
-ip addr flush dev wlan0 2>/dev/null
-ip addr add 192.192.193.1/24 dev wlan0
-ip link set wlan0 up
-$D/hostapd -B $D/hostapd.conf || exit 1
-$D/dnsmasq -C $D/dnsmasq.conf --pid-file=/var/run/dnsmasq-ap.pid
-pgrep -f captive.py >/dev/null 2>&1 || (setsid python3 $D/captive.py >/var/log/captive.log 2>&1 &)
-echo "AP laeuft: SSID marv-kvm, 192.192.193.1"
+# Entry point kept under its old name, because the autostart hook in
+# /etc/init.d/S99zerotier calls it and existing installs point at it.
+#
+# The work happens in wlan-apply.sh, which brings wlan0 into whichever mode is
+# recorded in /userdata/wlan-ap/mode ("ap" or "client"). With no mode file it
+# starts the access point, which is what this script always did.
+exec /userdata/wlan-ap/wlan-apply.sh "$@"
