@@ -14,14 +14,34 @@
 # before writing, verifies by reading back, and restores the backup itself if
 # that fails. It never reboots.
 #
+# It also drops the WLAN helper into /userdata/wlan-ap/: the mode switcher, the
+# menu, and a static wpa_supplicant. The kernel is what gives you a working USB
+# WLAN stick, and without those files you can only run an access point with it.
+# That part is additive -- it never touches an existing hostapd.conf, and a
+# failure there leaves the kernel install untouched. --no-wlan skips it.
+#
 # Read this before piping it into a shell. It overwrites a boot partition.
 set -eu
 
 REPO="macpit/glkvm-rm1pe-kernel"
-TAG="${TAG:-v23}"
+TAG="${TAG:-v24}"
 KERNEL_NAME="Image-6.1.141-${TAG}"
 KERNEL_SHA="d96cd811f8cf3888a5185b9c69f5e379f36888527584842a0135092a850581fd"
 PATCHER_SHA="dd7564615e1301e2cea804eadedd60bb1e03c6538cb74951510569406ce2a004"
+
+# The WLAN helper. The binaries come from the release, the scripts from the
+# branch, all pinned the same way as the kernel.
+WPA_SHA="09833d551d8c1d71f5ed8e05d2ce7a7729836d7c42800e981623f873a8da1ad7"
+WPA_CLI_SHA="764a8114098b6b23a80f00fce17f421307309a9a786d318d22a4820eeef6df00"
+MENU_SHA="d36db14b2033e15a6e454405504abb86e4db876764259e39cb47f128a5136fe9"
+APPLY_SHA="ad3cc09f618f9331213a31bdc6ae299636d7b9cfc39f3ae89439d2f0b1f57eb6"
+APSTART_SHA="60c2966ca72b52f22fb3a3f45b4c334e0e81f1f1e2057b019b1c350768896048"
+
+# Every ap-start.sh we have ever shipped, newest first. Anything not in this
+# list is treated as yours and left alone.
+AP_START_KNOWN="60c2966ca72b52f22fb3a3f45b4c334e0e81f1f1e2057b019b1c350768896048
+e9b74312e0602d4ad337ed4dcc5f15d53b27655ec01a36792a03b93f156bb16e
+08f1f22aa921e601de9864fdc1e53b33539f0020f15553f1f3b57866dd0c2984"
 
 ISSUES="https://github.com/${REPO}/issues"
 
@@ -35,7 +55,9 @@ RAW="https://raw.githubusercontent.com/${REPO}/main"
 BOOT="/dev/block/by-name/boot"
 BACKUP_DIR="/userdata/kernel-backup"
 WORK="/userdata/.glkvm-install"
-NEED_KB=81920                      # kernel + patched image + 32 MiB backup
+WLAN_DIR="/userdata/wlan-ap"
+NEED_KB=84992                      # kernel + patched image + 32 MiB backup
+                                   # + ~2.5 MiB of WLAN helper
 
 # Offline / testing: point these at local files to skip the downloads.
 KERNEL_FILE="${KERNEL_FILE:-}"
@@ -55,6 +77,7 @@ usage:
   install.sh --list           list images in $BACKUP_DIR
   install.sh --revert FILE    write FILE back into the boot partition
   -y, --yes                   do not ask for confirmation
+      --no-wlan               do not install the WLAN helper
 
 When piped straight into a shell, pass arguments after -s --, e.g.
   curl -sSL <url> | sh -s -- --list
@@ -64,12 +87,15 @@ USAGE
 MODE=install
 PICK=""
 ASSUME_YES=0
+WANT_WLAN=1
+WLAN_OK=0
 while [ $# -gt 0 ]; do
     case "$1" in
         --list)      MODE=list ;;
         --revert)    MODE=revert; PICK="${2:-}"; shift
                      [ -n "$PICK" ] || die "--revert needs a file; try --list" ;;
         -y|--yes)    ASSUME_YES=1 ;;
+        --no-wlan)   WANT_WLAN=0 ;;
         -h|--help)   usage; exit 0 ;;
         *)           usage >&2; exit 1 ;;
     esac
@@ -184,6 +210,61 @@ epilogue() {
     say "rebooting warm, since only a cold start exercises the HDMI bridge."
 }
 
+# ------------------------------------------------------------------------ wlan
+is_known_ap_start() {
+    for _h in $AP_START_KNOWN; do
+        [ "$1" = "$_h" ] && return 0
+    done
+    return 1
+}
+
+# Runs after the kernel is in place. Nothing here touches the boot partition,
+# so every failure is a warning: you end up with the kernel you asked for and
+# without the helper, which is recoverable by copying five files.
+install_wlan() {
+    [ "$WANT_WLAN" = 1 ] || return 0
+    if [ "$WLAN_OK" != 1 ]; then
+        say ""
+        say "The WLAN helper was not installed. The kernel is in place; you can"
+        say "add the helper later from wlan-ap/ in the repository."
+        return 0
+    fi
+
+    say "==> installing the WLAN helper into $WLAN_DIR"
+    mkdir -p "$WLAN_DIR" 2>/dev/null \
+        || { say "    cannot create $WLAN_DIR, skipped"; return 0; }
+
+    for f in wpa_supplicant wpa_cli wlan-menu.py wlan-apply.sh; do
+        cp "$WORK/$f" "$WLAN_DIR/$f" && chmod 700 "$WLAN_DIR/$f" \
+            || { say "    could not write $f, skipped"; return 0; }
+    done
+
+    # ap-start.sh is the one file here that might be yours: it is what the
+    # autostart hook calls, and people edit it. Replaced only when it is
+    # byte-for-byte something we shipped.
+    # Written as an if: under set -e a bare "[ -f x ] && y" is a failing
+    # command when x is absent, which is the normal first-install case.
+    cur=""
+    if [ -f "$WLAN_DIR/ap-start.sh" ]; then
+        cur=$(sha256sum "$WLAN_DIR/ap-start.sh" | cut -d' ' -f1)
+    fi
+    if [ -z "$cur" ] || is_known_ap_start "$cur"; then
+        cp "$WORK/ap-start.sh" "$WLAN_DIR/ap-start.sh"
+        chmod 700 "$WLAN_DIR/ap-start.sh"
+    else
+        say "    $WLAN_DIR/ap-start.sh is not one of ours, left untouched."
+        say "    Client mode at boot needs it to call wlan-apply.sh --"
+        say "    see docs/wlan-ap.md."
+    fi
+
+    # Absent a mode file, wlan-apply.sh starts the access point, which is what
+    # this device did before. Writing it makes that explicit rather than
+    # implicit, and never overrides a mode you already chose.
+    [ -f "$WLAN_DIR/mode" ] || echo ap > "$WLAN_DIR/mode"
+
+    say "    run $WLAN_DIR/wlan-menu.py to switch between access point and client"
+}
+
 # ------------------------------------------------------------------------ list
 if [ "$MODE" = list ]; then
     # boot-*.img, not just boot-backup-*.img: images put there by hand are just
@@ -240,6 +321,15 @@ fetch() {  # fetch <url> <dest> <expected-sha256>
     got      $got"
 }
 
+try_fetch() {  # same, but a failure is reported and survivable
+    curl -sSL --fail -o "$2" "$1" 2>/dev/null \
+        || { say "    download failed: $1"; return 1; }
+    got=$(sha256sum "$2" | cut -d' ' -f1)
+    [ "$got" = "$3" ] && return 0
+    say "    checksum mismatch for $(basename "$2")"
+    return 1
+}
+
 if [ -n "$KERNEL_FILE" ]; then
     say "==> using local kernel $KERNEL_FILE"
     cp "$KERNEL_FILE" "$WORK/kernel"
@@ -257,6 +347,23 @@ else
     fetch "$RAW/scripts/patch-fit.py" "$WORK/patch-fit.py" "$PATCHER_SHA"
 fi
 say "    checksums ok"
+
+# Fetched now so a network problem shows up before anything is written, but
+# kept out of the way of the kernel install if it fails.
+if [ "$WANT_WLAN" = 1 ]; then
+    say "==> fetching the WLAN helper"
+    if try_fetch "$REL/wpa_supplicant"        "$WORK/wpa_supplicant" "$WPA_SHA" \
+    && try_fetch "$REL/wpa_cli"               "$WORK/wpa_cli"        "$WPA_CLI_SHA" \
+    && try_fetch "$RAW/wlan-ap/wlan-menu.py"  "$WORK/wlan-menu.py"   "$MENU_SHA" \
+    && try_fetch "$RAW/wlan-ap/wlan-apply.sh" "$WORK/wlan-apply.sh"  "$APPLY_SHA" \
+    && try_fetch "$RAW/wlan-ap/ap-start.sh"   "$WORK/ap-start.sh"    "$APSTART_SHA"
+    then
+        WLAN_OK=1
+        say "    checksums ok"
+    else
+        say "    the kernel install continues without it"
+    fi
+fi
 
 # Build first: nothing is written anywhere until the image is known good.
 say "==> building the new image"
@@ -293,6 +400,8 @@ if ! write_and_verify "$WORK/new.img" "the new image"; then
     cat "$BACKUP" > "$BOOT"; sync
     die "write verification failed; the old partition has been restored"
 fi
+
+install_wlan
 
 epilogue
 say ""
