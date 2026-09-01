@@ -127,6 +127,8 @@ just failed is an unpleasant way to spend an evening.
 /userdata/wlan-ap/wlan-menu.py
 ```
 
+![The WLAN menu running on the device](img/wlan-menu.png)
+
 Plain curses, so it works over SSH and over the serial console. The header
 shows the mode, what `wlan0` currently has, and whether `eth0` is up -- that
 last line is not decoration. It tells you whether a failed switch can lock you
