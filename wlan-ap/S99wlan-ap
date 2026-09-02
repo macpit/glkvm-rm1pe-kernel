@@ -1,0 +1,22 @@
+#!/bin/sh
+# Bring the WLAN up at boot. Installed as /etc/init.d/S99wlan-ap.
+#
+# Runs late and in the background, because the USB stick takes a few seconds to
+# enumerate and nothing else should wait for it. The loop gives it 15 seconds;
+# if the stick is not there, ap-start.sh is never called and boot carries on.
+#
+# ap-start.sh execs wlan-apply.sh, which brings wlan0 into whichever mode is
+# recorded in /userdata/wlan-ap/mode. With no mode file that is the access
+# point.
+case "${1:-start}" in
+  start)
+    (for i in $(seq 1 15); do
+       lsusb 2>/dev/null | grep -q "0bda:8179" && break
+       sleep 1
+     done
+     /userdata/wlan-ap/ap-start.sh >> /var/log/wlan-ap.log 2>&1) &
+    ;;
+  stop)
+    killall hostapd dnsmasq wpa_supplicant 2>/dev/null
+    ;;
+esac
