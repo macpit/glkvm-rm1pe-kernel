@@ -60,7 +60,8 @@ rootfs ships neither.
 ap-start.sh        entry point under its old name; execs wlan-apply.sh
 wlan-apply.sh      brings wlan0 into the mode recorded in ./mode
 wlan-menu.py       the menu: scan, join, switch back, rename, change the key
-S99wlan-ap         goes to /etc/init.d/, starts the WLAN at boot
+S99wlan-ap         goes to /etc/init.d/ -- but see "Starting at boot" below,
+                   putting it there is not enough on its own
 hostapd.conf.example   copy to hostapd.conf and set your own SSID and passphrase
 dnsmasq.conf       DHCP, wildcard DNS, captive-portal options
 captive.py         the state service behind the portal
@@ -97,6 +98,38 @@ contents are read from the overlay at execution time.
 
 **Overlay-only init scripts never start on their own on this device.** Anything
 you add needs the same treatment.
+
+## Starting at boot
+
+Dropping a script into `/etc/init.d/` does not get it run on this device, and
+the reason is worth knowing before you spend an evening on it.
+
+`rcS` expands its `S??*` glob **before** the overlay is mounted. The root
+filesystem is an overlay -- `lowerdir=/`, `upperdir=/userdata/overlay/upper` --
+and anything you create lands in the upper layer. At glob time that layer is
+not there yet, so your script is invisible and never runs. Scripts the firmware
+ships live in the lower layer, so the glob finds them; by the time they
+actually execute the overlay is up, which is why editing one of them works.
+
+So `install.sh` does both: it writes `/etc/init.d/S99wlan-ap`, and it plants a
+single line inside the `start)` case of a firmware script that the glob does
+see -- `S99zerotier` by default, falling back to `S99tailscale`, `S99netbird`
+or `S99rtty`:
+
+```sh
+        /etc/init.d/S99wlan-ap start
+```
+
+The original is backed up to `/userdata/wlan-ap/backup/` first and the result
+is checked with `sh -n`; if it does not parse, the original goes straight back.
+The step is idempotent, and if no suitable script is found the installer says
+so and prints the line for you to place by hand.
+
+The symptom when this is missing is confusing rather than obvious: everything
+is installed, the menu works, "restart access point" brings the AP up -- and
+after a reboot there is no WLAN and no log, because nothing ever called the
+script. A firmware update replaces the host script, so the line has to be
+planted again; running `install.sh` a second time does that.
 
 ## The driver
 

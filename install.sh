@@ -269,7 +269,62 @@ install_initd() {
         return 0
     fi
     cp "$WORK/S99wlan-ap" "$hook" && chmod 755 "$hook" \
-        || say "    could not install $hook; the WLAN will not start at boot"
+        || { say "    could not install $hook; the WLAN will not start at boot"
+             return 0; }
+    plant_boot_call
+}
+
+# rcS expands /etc/init.d/S??* before the overlay is mounted, so the script we
+# just wrote -- which exists only in the overlay upper layer -- is invisible to
+# that glob and never runs at boot. Scripts the firmware ships are in the lower
+# layer, so the glob finds them, and by the time they execute the overlay is up
+# and our file is reachable. So the call goes inside one of theirs.
+#
+# Found the hard way on a second device: the helper was installed, the menu
+# worked, and the access point simply never came up after a reboot.
+plant_boot_call() {
+    for h in S99zerotier S99tailscale S99netbird S99rtty; do
+        host="/etc/init.d/$h"
+        [ -f "$host" ] || continue
+
+        if grep -q "S99wlan-ap start" "$host" 2>/dev/null; then
+            say "    boot call already present in $host"
+            return 0
+        fi
+
+        cp "$host" "$WLAN_DIR/backup/$h.orig" 2>/dev/null || continue
+        if python3 - "$host" <<'PY'
+import re, sys
+path = sys.argv[1]
+lines = open(path).read().split("\n")
+call = ("        /etc/init.d/S99wlan-ap start"
+        "  # planted by glkvm-rm1pe-kernel: rcS globs before pivot_root,"
+        " so an overlay-only init script is never seen")
+for i, line in enumerate(lines):
+    if re.match(r"^\s*start\)\s*$", line):
+        lines.insert(i + 1, call)
+        open(path, "w").write("\n".join(lines))
+        sys.exit(0)
+sys.exit(1)
+PY
+        then
+            if sh -n "$host" 2>/dev/null; then
+                say "    boot call planted in $host"
+                return 0
+            fi
+            cp "$WLAN_DIR/backup/$h.orig" "$host"
+            say "    $host would not parse with the boot call; restored"
+        fi
+    done
+
+    say ""
+    say "    Could not plant the boot call in any firmware init script."
+    say "    The access point will not come up on its own after a reboot."
+    say "    Add this line inside the start) case of one of them by hand:"
+    say "        /etc/init.d/S99wlan-ap start"
+    say "    Writing /etc/init.d/S99wlan-ap alone is not enough -- see"
+    say "    docs/wlan-ap.md for why."
+    say ""
 }
 
 # The captive portal needs two server blocks in the kvmd nginx config. This is
