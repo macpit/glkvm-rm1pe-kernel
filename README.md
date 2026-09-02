@@ -167,12 +167,19 @@ Then it downloads the release kernel and `scripts/patch-fit.py` and verifies
 both against checksums pinned in the script, and swaps the kernel inside the
 FIT already in your boot partition.
 
-It also installs the WLAN helper into `/userdata/wlan-ap/`: the menu, the mode
-switcher and a static `wpa_supplicant`. The kernel is what makes a USB WLAN
-stick work, and without those files you can only run an access point with it.
-That step is additive -- an existing `hostapd.conf` is never touched, and an
-`ap-start.sh` that is not byte-for-byte one of ours is left alone -- and a
-failure there does not affect the kernel. `--no-wlan` skips it entirely.
+It also installs everything the WLAN needs: the `8188eu` driver module,
+`hostapd`, `dnsmasq`, `wpa_supplicant`, the menu, the captive portal and the
+autostart hook. The kernel alone only gets the stick enumerated -- without the
+driver there is no `wlan0` at all.
+
+That step is additive. An existing `hostapd.conf` is never touched; on a fresh
+device the SSID is derived from the hostname and the passphrase is generated
+and printed, because an access point whose key is in a public repository is not
+an access point with a key. An `ap-start.sh` that is not byte-for-byte one of
+ours is left alone. The nginx change -- two server blocks for the captive
+portal -- is backed up, tested, and reverted if nginx does not accept it.
+Nothing in this step can reach the boot partition, so a failure there leaves
+the kernel install intact. `--no-wlan` skips all of it.
 
 Nothing is written until that image exists and is checked. The FIT already in
 your partition has to match its own recorded checksums before its device tree
@@ -253,7 +260,8 @@ install.sh  one-line installer, runs on the device itself
 patches/    the four patches, in order
 scripts/    build the FIT, install it, roll it back -- all over SSH
             patch-fit.py swaps the kernel inside an existing FIT, on the device
-            build-wpa-supplicant.sh cross-builds the static wpa_supplicant
+            build-userland.sh cross-builds hostapd, dnsmasq and wpa_supplicant
+            build-8188eu.sh builds the WLAN driver against your kernel tree
 wlan-ap/    access point, client mode and captive portal, ready to drop into
             /userdata -- wlan-menu.py is the thing you actually run
 docs/       dev-machine, device-only, build, recovery, the LT6911C driver,
@@ -299,12 +307,14 @@ I am not a lawyer. This is how the repository is put together and why.
 No GL.iNet binaries are redistributed here. The patches are written against
 their published GPL sources.
 
-The release does contain one binary we built ourselves: a static
-`wpa_supplicant` 2.11 (BSD-3-Clause) linked against libnl (LGPL-2.1) and glibc.
-Static linking against an LGPL library carries a relinking obligation, so
-`scripts/build-wpa-supplicant.sh` is in the tree with the exact versions,
-checksums and flags. Anyone can reproduce the binary or build a different one
-and drop it in. Nobody has to take the shipped one. `build-fit.sh` reads the device tree and the
+The release does contain binaries we built ourselves, from upstream sources at
+pinned commits: `hostapd` and `wpa_supplicant` (BSD-3-Clause), `dnsmasq`
+(GPL-2.0) and the `8188eu` driver module (GPL-2.0), the first three linked
+statically against libnl (LGPL-2.1) and glibc. Static linking against an LGPL
+library carries a relinking obligation, so `scripts/build-userland.sh` and
+`scripts/build-8188eu.sh` are in the tree with the exact commits, versions and
+flags. Anyone can rebuild them or substitute their own. Nobody has to take the
+shipped ones. `build-fit.sh` reads the device tree and the
 Rockchip resource blob off your own device instead of shipping copies, and the
 planned image tool will work on a file you downloaded yourself.
 

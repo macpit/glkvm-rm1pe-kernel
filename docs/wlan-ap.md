@@ -60,14 +60,25 @@ rootfs ships neither.
 ap-start.sh        entry point under its old name; execs wlan-apply.sh
 wlan-apply.sh      brings wlan0 into the mode recorded in ./mode
 wlan-menu.py       the menu: scan, join, switch back, rename, change the key
+S99wlan-ap         goes to /etc/init.d/, starts the WLAN at boot
 hostapd.conf.example   copy to hostapd.conf and set your own SSID and passphrase
 dnsmasq.conf       DHCP, wildcard DNS, captive-portal options
 captive.py         the state service behind the portal
 portal/index.html  the page itself
 nginx-ap-block.conf    the two server blocks to add to nginx
 restart-cap.sh     restart the state service
-wpa_supplicant     static aarch64 build, not in the repository -- see below
-wpa_cli            same, optional, for debugging a link
+```
+
+Four binaries and one kernel module are not in the repository, because they are
+build products rather than source. `install.sh` fetches them from the release,
+verified against checksums pinned in the script:
+
+```
+/userdata/wlan-modules/8188eu.ko   the driver -- without it there is no wlan0
+/userdata/wlan-ap/hostapd          access point
+/userdata/wlan-ap/dnsmasq          DHCP and wildcard DNS
+/userdata/wlan-ap/wpa_supplicant   client mode
+/userdata/wlan-ap/wpa_cli          optional, for debugging a link
 ```
 
 The AP lives on `192.192.193.1/24` and hands out `.100` to `.150`.
@@ -87,39 +98,58 @@ contents are read from the overlay at execution time.
 **Overlay-only init scripts never start on their own on this device.** Anything
 you add needs the same treatment.
 
+## The driver
+
+The kernel from this repository enumerates the stick, and that is all it does.
+The USB id shows up in `lsusb`, `dmesg` says `New USB device found, idVendor=
+0bda, idProduct=8179` -- and then nothing. No `wlan0`, no access point, no
+client mode.
+
+What is missing is the driver. The in-tree `r8188eu` exists but does not do AP
+mode, which is most of the point here, so we use the out-of-tree
+[aircrack-ng/rtl8188eus](https://github.com/aircrack-ng/rtl8188eus) driver
+instead. `scripts/build-8188eu.sh` builds it against the same kernel tree you
+built the kernel from:
+
+```sh
+scripts/build-8188eu.sh ~/kvm/build-141 out-8188eu
+scp out-8188eu/8188eu.ko root@<device>:/userdata/wlan-modules/
+```
+
+The module is tied to that kernel: `insmod` compares the vermagic string and
+refuses anything else. So it cannot be built once and shipped forever -- a new
+kernel version means a new module. `install.sh` checks this and says so rather
+than leaving you with a silent `insmod` failure at boot.
+
+`wlan-apply.sh` loads the module itself, so nothing else has to remember to.
+
+## Building the userland
+
+```sh
+scripts/build-userland.sh out-userland
+```
+
+Produces `hostapd`, `dnsmasq`, `wpa_supplicant` and `wpa_cli`, all statically
+linked for aarch64. hostapd and wpa_supplicant are built with
+`CONFIG_TLS=internal` and no EAP, which drops the entire TLS and PKI stack --
+WPA2 and WPA3 personal need none of it, and leaving it out is what makes a
+static build reasonable instead of requiring a cross-compiled OpenSSL.
+
+Static because the rootfs has no libnl and no package manager. A dynamic build
+would mean shipping shared objects and an `LD_LIBRARY_PATH` on a device whose
+only other link may be a WLAN switch that just failed.
+
+The builds are not byte-reproducible -- paths and build ids end up in the
+binaries, so your checksums will differ from the ones in the release. What you
+can check is that the sources are the pinned upstream commits, which the script
+verifies before it builds anything.
+
 ## Client mode
 
 `wlan-apply.sh` reads `/userdata/wlan-ap/mode`, which holds `ap` or `client`,
 and brings `wlan0` up accordingly. With no mode file it starts the access
 point, which is what the device did before any of this existed. `wlan-menu.py`
 writes that file and re-runs the script; nothing else needs to know.
-
-### wpa_supplicant
-
-Client mode needs `wpa_supplicant`, and the RM1PE rootfs does not have one.
-There are two ways to get it and neither is better than the other:
-
-* **Take the one from the release.** `install.sh` puts it in
-  `/userdata/wlan-ap/` along with the menu, verified against a checksum pinned
-  in the script. Nothing to build.
-* **Build it yourself.** `scripts/build-wpa-supplicant.sh` produces exactly the
-  same thing on a Debian 12 box with the cross toolchain from
-  [dev-machine.md](dev-machine.md):
-
-  ```sh
-  scripts/build-wpa-supplicant.sh out-wpa
-  scp out-wpa/wpa_supplicant out-wpa/wpa_cli root@<device>:/userdata/wlan-ap/
-  ```
-
-It is wpa_supplicant 2.11, statically linked against libnl 3.7.0, built with
-`CONFIG_TLS=internal` and no EAP. That drops the entire TLS and PKI stack,
-which is what makes a static binary reasonable here -- WPA2 and WPA3 personal
-need none of it. If you want EAP for an enterprise network, you want a
-different build, and then you also want OpenSSL cross-compiled.
-
-Static because the rootfs has no libnl and no package manager, and because a
-missing shared object on a device whose only other link is a WLAN switch that
-just failed is an unpleasant way to spend an evening.
 
 ### The menu
 
