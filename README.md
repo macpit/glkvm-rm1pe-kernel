@@ -51,6 +51,7 @@ verify.
 | USB WLAN | Realtek RTL8188EU (`0bda:8179`), station and access point |
 | Access point | hostapd + dnsmasq + a captive portal that shows the KVM address |
 | Client mode | Join an existing WLAN, with a menu to switch and a watchdog that puts the AP back if it fails |
+| Discovery | Reachable as `<hostname>.local`, and listed in the Windows network view via SSDP -- see [docs/discovery.md](docs/discovery.md) |
 | Vendor modules | All six load: `kmpp`, `kmpp_smart`, `rockit*`, `gl-hw-info` |
 | Streaming | Unchanged: kvmd, ustreamer, WebRTC over the vendor pipeline |
 
@@ -265,7 +266,7 @@ scripts/    build the FIT, install it, roll it back -- all over SSH
 wlan-ap/    access point, client mode and captive portal, ready to drop into
             /userdata -- wlan-menu.py is the thing you actually run
 docs/       dev-machine, device-only, build, recovery, the LT6911C driver,
-            WLAN
+            WLAN, network discovery
 ```
 
 ## Planned

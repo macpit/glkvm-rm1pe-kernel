@@ -1,13 +1,9 @@
 #!/bin/sh
-# Bring the WLAN up at boot. Installed as /etc/init.d/S99wlan-ap.
+# Starts what we added at boot: the WLAN, and the SSDP responder that puts
+# this device into the Windows network view.
 #
-# Runs late and in the background, because the USB stick takes a few seconds to
-# enumerate and nothing else should wait for it. The loop gives it 15 seconds;
-# if the stick is not there, ap-start.sh is never called and boot carries on.
-#
-# ap-start.sh execs wlan-apply.sh, which brings wlan0 into whichever mode is
-# recorded in /userdata/wlan-ap/mode. With no mode file that is the access
-# point.
+# Note this script is not reached by the rcS glob -- see docs/wlan-ap.md. It is
+# called from a firmware init script, which is the only kind the glob sees.
 case "${1:-start}" in
   start)
     (for i in $(seq 1 15); do
@@ -15,8 +11,15 @@ case "${1:-start}" in
        sleep 1
      done
      /userdata/wlan-ap/ap-start.sh >> /var/log/wlan-ap.log 2>&1) &
+
+    # Independent of the WLAN: this one only needs eth0, so it does not wait
+    # for a USB stick that may not be plugged in at all.
+    if [ -x /userdata/wlan-ap/ssdp.py ]; then
+      (setsid python3 /userdata/wlan-ap/ssdp.py >> /var/log/ssdp.log 2>&1) &
+    fi
     ;;
   stop)
     killall hostapd dnsmasq wpa_supplicant 2>/dev/null
+    pkill -f ssdp.py 2>/dev/null
     ;;
 esac
