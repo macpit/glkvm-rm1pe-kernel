@@ -1,0 +1,36 @@
+#!/bin/sh
+# Start the SSDP responder that puts this device into the Windows network view.
+# Installed as /etc/init.d/S99discovery.
+#
+# This script is not reached by the rcS glob: rcS expands S??* before the
+# overlay is mounted, and anything installed lands in the overlay upper layer.
+# A firmware init script calls it instead -- see install-discovery.sh.
+#
+# Unlike the WLAN, this needs nothing but a network interface, so it starts
+# straight away rather than waiting for hardware to appear.
+
+DIR=/userdata/discovery
+
+case "${1:-start}" in
+  start)
+    [ -x "$DIR/ssdp.py" ] || exit 0
+    pgrep -f "$DIR/ssdp.py" >/dev/null && exit 0
+    (setsid python3 "$DIR/ssdp.py" >> /var/log/ssdp.log 2>&1 &) 2>/dev/null
+    ;;
+  stop)
+    pkill -f "$DIR/ssdp.py" 2>/dev/null
+    ;;
+  restart)
+    "$0" stop
+    sleep 1
+    "$0" start
+    ;;
+  status)
+    if pgrep -f "$DIR/ssdp.py" >/dev/null; then
+      echo "running"
+    else
+      echo "stopped"
+      exit 1
+    fi
+    ;;
+esac

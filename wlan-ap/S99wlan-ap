@@ -1,6 +1,6 @@
 #!/bin/sh
-# Starts what we added at boot: the WLAN, and the SSDP responder that puts
-# this device into the Windows network view.
+# Starts the WLAN at boot. Network discovery is a separate concern and has its
+# own script -- see /etc/init.d/S99discovery and install-discovery.sh.
 #
 # Note this script is not reached by the rcS glob -- see docs/wlan-ap.md. It is
 # called from a firmware init script, which is the only kind the glob sees.
@@ -12,14 +12,8 @@ case "${1:-start}" in
      done
      /userdata/wlan-ap/ap-start.sh >> /var/log/wlan-ap.log 2>&1) &
 
-    # Independent of the WLAN: this one only needs eth0, so it does not wait
-    # for a USB stick that may not be plugged in at all.
-    if [ -x /userdata/wlan-ap/ssdp.py ]; then
-      (setsid python3 /userdata/wlan-ap/ssdp.py >> /var/log/ssdp.log 2>&1) &
-    fi
     ;;
   stop)
     killall hostapd dnsmasq wpa_supplicant 2>/dev/null
-    pkill -f ssdp.py 2>/dev/null
     ;;
 esac

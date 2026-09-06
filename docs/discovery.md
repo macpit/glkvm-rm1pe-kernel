@@ -35,19 +35,38 @@ services. A device can therefore be perfectly visible to every Bonjour browser
 and still be missing from Explorer, which is exactly what happened here: a
 Synology NAS on the same wire showed up, the KVMs did not.
 
-`wlan-ap/ssdp.py` closes that gap. It answers `M-SEARCH`, sends the periodic
+`discovery/ssdp.py` closes that gap. It answers `M-SEARCH`, sends the periodic
 alive notifications, and serves a minimal UPnP device description on port 1901.
 Windows shows the device under its hostname and model, and a double-click opens
 `presentationURL` -- the KVM web interface.
 
-`install.sh` installs and starts it. If you are doing it by hand:
+### Installing it on its own
+
+This part has nothing to do with the custom kernel, so it is installed
+separately and works on any GL KVM with Python 3 -- an RM1, an RM1 v2, a device
+on stock firmware you have no intention of reflashing. On the device:
 
 ```sh
-scp wlan-ap/ssdp.py root@<device>:/userdata/wlan-ap/
-ssh root@<device> 'chmod 700 /userdata/wlan-ap/ssdp.py'
+curl -sSLo /tmp/d.sh https://raw.githubusercontent.com/macpit/glkvm-rm1pe-kernel/main/install-discovery.sh
+sh /tmp/d.sh
 ```
 
-and add the call to `/etc/init.d/S99wlan-ap`, which is what starts it at boot.
+It writes `/userdata/discovery/ssdp.py` and `/etc/init.d/S99discovery`, adds one
+line to a firmware init script so it survives a reboot, and starts it. Nothing
+else is touched: no kernel, no boot partition, no firmware binary.
+
+To remove it again, including the planted line:
+
+```sh
+sh /tmp/d.sh --uninstall
+```
+
+`install.sh` from this repository runs the same script as its last step, so a
+kernel install gets it too. There is one implementation, not two.
+
+A firmware update replaces the init script that carries the boot call, so the
+service will stop coming up on its own. Running the installer again puts the
+line back.
 
 Notes worth having:
 

@@ -41,14 +41,14 @@ MODULE_SHA="88514328082425ad1758071204f87e001e4066b936882c9aff39838598d30118"
 MENU_SHA="d36db14b2033e15a6e454405504abb86e4db876764259e39cb47f128a5136fe9"
 APPLY_SHA="ad3cc09f618f9331213a31bdc6ae299636d7b9cfc39f3ae89439d2f0b1f57eb6"
 APSTART_SHA="60c2966ca72b52f22fb3a3f45b4c334e0e81f1f1e2057b019b1c350768896048"
-INITD_SHA="5f34ba3736d224f45a93514d3b0cad9c84c0687c4bc4ac70ef307e9e3d451a52"
+INITD_SHA="3303cfd77b9833ca3380042e1eb0598c128a308aa8871bc76922c95d9b858a23"
 CAPTIVE_SHA="dfe117c040e2e7de6d0297e345068f883bf85d80a1c7db99fbb36ef585a19a4e"
 DNSMASQ_CONF_SHA="901a7b17f19c4440f6ccf141d087264cc3da1a773ab874095c1e716ee9ea9694"
 RESTARTCAP_SHA="e733fb8373522519c2085339ab1dd2049036b8293221b0e475d931ed84ad80bc"
 HOSTAPD_EXAMPLE_SHA="44302b7be29653a04021490ce527bb1861a149c304898d57c9947307ba377c46"
 NGINX_BLOCK_SHA="856ee394674c2254e413aa3a0f5e7b4eccb952b0a85ab7d5dee301eb840d8a7c"
 PORTAL_SHA="c0dc9a3b0f70054e85332a30985bb41ca8f65ad4729c06f0b6f66d7fa64342e6"
-SSDP_SHA="587d82f4e922a54e6d2e0d679f63d7a2a77c42648711b328e5a9407d6fdc7555"
+DISCOVERY_SHA="06c4476a3681a6d3b353be9deb707cd654e750ac58f43e280fc115e01122f3a6"
 
 # Every ap-start.sh we have ever shipped, newest first. Anything not in this
 # list is treated as yours and left alone.
@@ -392,7 +392,7 @@ install_wlan() {
     check_module_vermagic
 
     for f in wpa_supplicant wpa_cli hostapd dnsmasq wlan-menu.py wlan-apply.sh \
-             captive.py restart-cap.sh ssdp.py; do
+             captive.py restart-cap.sh; do
         cp "$WORK/$f" "$WLAN_DIR/$f" && chmod 700 "$WLAN_DIR/$f" \
             || { say "    could not write $f, skipped"; return 0; }
     done
@@ -426,14 +426,24 @@ install_wlan() {
     # implicit, and never overrides a mode you already chose.
     [ -f "$WLAN_DIR/mode" ] || echo ap > "$WLAN_DIR/mode"
 
-    # Started right away: it needs nothing but eth0, and waiting for a reboot
-    # to appear in the network view is a poor first impression.
-    pkill -f "$WLAN_DIR/ssdp.py" 2>/dev/null
-    (setsid python3 "$WLAN_DIR/ssdp.py" >> /var/log/ssdp.log 2>&1 &) 2>/dev/null
-    say "    announcing this device over SSDP; it should appear in the"
-    say "    Windows network view, and in Bonjour browsers via the vendor mDNS"
     say "    run $WLAN_DIR/wlan-menu.py to switch between access point and client"
     say "    the access point starts by itself at the next boot"
+}
+
+# ------------------------------------------------------------------- discovery
+# Deliberately not reimplemented here: install-discovery.sh is a standalone
+# thing that works on any GL KVM without this kernel, and having one copy of it
+# beats keeping two in step. Failure is not fatal -- it announces the device on
+# the network, it does not make it work.
+install_discovery() {
+    [ "$WANT_WLAN" = 1 ] || return 0
+    [ -f "$WORK/install-discovery.sh" ] || return 0
+    say "==> network discovery"
+    if sh "$WORK/install-discovery.sh" 2>&1 | sed 's/^/    /'; then
+        :
+    else
+        say "    discovery setup failed; the kernel install is unaffected"
+    fi
 }
 
 # ------------------------------------------------------------------------ list
@@ -538,7 +548,7 @@ if [ "$WANT_WLAN" = 1 ]; then
     && try_fetch "$RAW/wlan-ap/hostapd.conf.example" "$WORK/hostapd.conf.example" "$HOSTAPD_EXAMPLE_SHA" \
     && try_fetch "$RAW/wlan-ap/nginx-ap-block.conf"  "$WORK/nginx-ap-block.conf"  "$NGINX_BLOCK_SHA" \
     && try_fetch "$RAW/wlan-ap/portal/index.html" "$WORK/portal-index.html"  "$PORTAL_SHA" \
-    && try_fetch "$RAW/wlan-ap/ssdp.py"           "$WORK/ssdp.py"            "$SSDP_SHA"
+    && try_fetch "$RAW/install-discovery.sh"      "$WORK/install-discovery.sh" "$DISCOVERY_SHA"
     then
         WLAN_OK=1
         say "    checksums ok"
@@ -584,6 +594,7 @@ if ! write_and_verify "$WORK/new.img" "the new image"; then
 fi
 
 install_wlan
+install_discovery
 
 epilogue
 say ""

@@ -258,6 +258,8 @@ this repository is the practical way to a kernel you can actually modify.
 
 ```
 install.sh  one-line installer, runs on the device itself
+install-discovery.sh  standalone: makes any GL KVM visible in the Windows
+            network view, no kernel required
 patches/    the four patches, in order
 scripts/    build the FIT, install it, roll it back -- all over SSH
             patch-fit.py swaps the kernel inside an existing FIT, on the device
@@ -265,6 +267,7 @@ scripts/    build the FIT, install it, roll it back -- all over SSH
             build-8188eu.sh builds the WLAN driver against your kernel tree
 wlan-ap/    access point, client mode and captive portal, ready to drop into
             /userdata -- wlan-menu.py is the thing you actually run
+discovery/  the SSDP responder and its init script
 docs/       dev-machine, device-only, build, recovery, the LT6911C driver,
             WLAN, network discovery
 ```
