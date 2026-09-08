@@ -1,8 +1,8 @@
 # Finding the device on the network
 
 With DHCP, the annoying part of owning several of these is not operating them,
-it is finding them. This page covers the two mechanisms that make that
-unnecessary, and why you need both.
+it is finding them. This page covers the three mechanisms that make that
+unnecessary.
 
 ## mDNS -- already there, nothing to do
 
@@ -26,6 +26,26 @@ three boxes called `glkvm` are no better than three IP addresses.
 The instance name (`GL-RM1PE-c80`) is a different thing: it comes from
 `/etc/mDNSResponder.conf`, is derived from the MAC, and the GL mobile app very
 likely finds devices by it. Leave that one alone.
+
+## Bonjour / macOS Finder
+
+The mDNS name alone is enough to reach the device by URL, but the Finder
+sidebar under "Network" only shows services it recognises.  `_glinet._tcp` is
+GL's proprietary type, so the Finder ignores it.
+
+`S99discovery` therefore also registers `_http._tcp` via the on-device `dns-sd`
+tool.  This makes the KVM show up in the Finder (and in any Bonjour browser) as
+a web service.  A double-click opens Safari at `https://<hostname>.local/`.
+
+The TXT record carries `path=/` and `model=RM1PE` (read from `/etc/version`).
+The registration is a single background `dns-sd -R` process managed alongside
+`ssdp.py` by the same init script.
+
+To check from a Mac:
+
+```sh
+dns-sd -B _http._tcp              # live list -- the KVM should appear
+```
 
 ## SSDP -- what Windows actually uses
 

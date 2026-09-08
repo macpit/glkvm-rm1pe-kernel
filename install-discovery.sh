@@ -28,7 +28,7 @@ BRANCH="${BRANCH:-main}"
 RAW="https://raw.githubusercontent.com/$REPO/$BRANCH"
 
 SSDP_SHA="587d82f4e922a54e6d2e0d679f63d7a2a77c42648711b328e5a9407d6fdc7555"
-INITD_SHA="67957b21fc43272df417ba95f8d4c57349b83e33aaa24f16a333637012d71ff8"
+INITD_SHA="a325f62f94f3a7800d3479d2a12fdc8674fd116e090f09059e0b202c9f0570f0"
 
 DIR="/userdata/discovery"
 INITD="/etc/init.d/S99discovery"

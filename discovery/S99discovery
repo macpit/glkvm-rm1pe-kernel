@@ -1,5 +1,6 @@
 #!/bin/sh
-# Start the SSDP responder that puts this device into the Windows network view.
+# Network discovery: makes this device visible in the Windows Explorer
+# (SSDP/UPnP) and in macOS Finder / Bonjour browsers (_http._tcp).
 # Installed as /etc/init.d/S99discovery.
 #
 # This script is not reached by the rcS glob: rcS expands S??* before the
@@ -10,15 +11,50 @@
 # straight away rather than waiting for hardware to appear.
 
 DIR=/userdata/discovery
+BONJOUR_PIDFILE=/var/run/discovery-bonjour.pid
+
+start_ssdp() {
+    [ -x "$DIR/ssdp.py" ] || return
+    pgrep -f "$DIR/ssdp.py" >/dev/null && return
+    (setsid python3 "$DIR/ssdp.py" >> /var/log/ssdp.log 2>&1 &) 2>/dev/null
+}
+
+start_bonjour() {
+    # Register an _http._tcp service so macOS Finder and Bonjour browsers
+    # see the device.  dns-sd talks to the already-running mdnsd.
+    command -v dns-sd >/dev/null 2>&1 || return
+    [ -f "$BONJOUR_PIDFILE" ] && kill -0 "$(cat "$BONJOUR_PIDFILE")" 2>/dev/null && return
+
+    # Read model from the same source as ssdp.py / mDNSResponder-param-init
+    _model=""
+    [ -f /etc/version ] && _model=$(grep RK_MODEL /etc/version | cut -d= -f2 | tr -d ' ')
+    _name="$(hostname)"
+    # TXT records: path for the browser, model for informational display
+    dns-sd -R "$_name" _http._tcp local 443 path=/ ${_model:+model=$_model} &
+    echo $! > "$BONJOUR_PIDFILE"
+}
+
+stop_ssdp() {
+    pkill -f "$DIR/ssdp.py" 2>/dev/null
+}
+
+stop_bonjour() {
+    if [ -f "$BONJOUR_PIDFILE" ]; then
+        kill "$(cat "$BONJOUR_PIDFILE")" 2>/dev/null
+        rm -f "$BONJOUR_PIDFILE"
+    fi
+    # Belt and suspenders
+    pkill -f 'dns-sd -R .* _http._tcp' 2>/dev/null
+}
 
 case "${1:-start}" in
   start)
-    [ -x "$DIR/ssdp.py" ] || exit 0
-    pgrep -f "$DIR/ssdp.py" >/dev/null && exit 0
-    (setsid python3 "$DIR/ssdp.py" >> /var/log/ssdp.log 2>&1 &) 2>/dev/null
+    start_ssdp
+    start_bonjour
     ;;
   stop)
-    pkill -f "$DIR/ssdp.py" 2>/dev/null
+    stop_bonjour
+    stop_ssdp
     ;;
   restart)
     "$0" stop
@@ -26,11 +62,17 @@ case "${1:-start}" in
     "$0" start
     ;;
   status)
+    _ok=0
     if pgrep -f "$DIR/ssdp.py" >/dev/null; then
-      echo "running"
+      echo "ssdp: running"
     else
-      echo "stopped"
-      exit 1
+      echo "ssdp: stopped"; _ok=1
     fi
+    if [ -f "$BONJOUR_PIDFILE" ] && kill -0 "$(cat "$BONJOUR_PIDFILE")" 2>/dev/null; then
+      echo "bonjour: running"
+    else
+      echo "bonjour: stopped"; _ok=1
+    fi
+    exit $_ok
     ;;
 esac
