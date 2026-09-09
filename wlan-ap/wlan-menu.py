@@ -25,6 +25,7 @@ CLIENT_CONF = os.path.join(D, "wifi-client.conf")
 HOSTAPD_CONF = os.path.join(D, "hostapd.conf")
 APPLY = os.path.join(D, "wlan-apply.sh")
 WPA_SUPPLICANT = os.path.join(D, "wpa_supplicant")
+SMB_SETPW = "/userdata/smb/set-smb-password.sh"
 
 IFACE = "wlan0"
 ETH = "eth0"
@@ -675,7 +676,42 @@ def action_hostname(stdscr, st):
     set_hostname(name)
     message(stdscr, "Done",
             ["Hostname is now %s." % name,
-             "Some services only pick it up after a reboot."])
+             "mDNS, SSDP, WSD and the SMB share follow",
+             "within about 15 seconds."])
+
+
+def why_not_smb(st):
+    if not os.path.exists(SMB_SETPW):
+        return ["The SMB share is not installed on this device.",
+                "",
+                "install-smb.sh from the repository sets it up:",
+                "  /userdata/media as \\\\<hostname>\\media"]
+    return None
+
+
+def action_smb_password(stdscr, st):
+    pw = prompt(stdscr, "SMB password", "New password for user admin",
+                hidden=True)
+    if pw is None:
+        return
+    if len(pw) < 4:
+        message(stdscr, "Too short", ["Use at least 4 characters."])
+        return
+    again = prompt(stdscr, "SMB password", "Repeat it", hidden=True)
+    if again != pw:
+        message(stdscr, "Mismatch",
+                ["The two entries differ. Nothing was changed."])
+        return
+    r = subprocess.run(["sh", SMB_SETPW, pw], capture_output=True, text=True)
+    if r.returncode == 0:
+        message(stdscr, "Saved",
+                ["SMB user admin updated.",
+                 "",
+                 "Write access:  smb://admin@%s.local/media" % st["host"],
+                 "Guests (read): user guest, no password"])
+    else:
+        err = (r.stderr or r.stdout).strip().splitlines()[-3:]
+        message(stdscr, "Failed", err or ["set-smb-password.sh failed"])
 
 
 def action_ap_credentials(stdscr, st):
@@ -735,6 +771,7 @@ MENU = [
     (label_switch_ap, action_switch_ap, None),
     ("Change hostname", action_hostname, None),
     ("Change AP SSID and passphrase", action_ap_credentials, None),
+    ("Change SMB share password (admin)", action_smb_password, why_not_smb),
 ]
 
 
