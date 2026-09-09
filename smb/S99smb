@@ -123,9 +123,10 @@ stop() {
         [ -f "$p" ] && kill "$(cat "$p")" 2>/dev/null
     done
     rm -rf "$PIDDIR"
-    [ -x "$CONTROL" ] && "$CONTROL" -s 2>/dev/null
-    pkill -f "$MOUNTD" 2>/dev/null
-    sleep 1
+    if pgrep -f "$MOUNTD" >/dev/null; then
+        "$CONTROL" -s >/dev/null 2>&1 || pkill -f "$MOUNTD" 2>/dev/null
+        sleep 1
+    fi
     rmmod ksmbd 2>/dev/null
     rmmod cifs_md4 2>/dev/null
     rmmod cifs_arc4 2>/dev/null
