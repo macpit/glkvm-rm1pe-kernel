@@ -23,7 +23,7 @@ set -eu
 
 REPO="macpit/glkvm-rm1pe-kernel"
 BRANCH="${BRANCH:-main}"
-TAG="${TAG:-v31}"
+TAG="${TAG:-v32}"
 RAW="https://raw.githubusercontent.com/$REPO/$BRANCH"
 REL="https://github.com/$REPO/releases/download/$TAG"
 
@@ -79,8 +79,19 @@ done
 [ -w /etc/init.d ] || die "/etc/init.d is not writable; run this as root."
 
 RUNNING=$(uname -r)
-[ "$RUNNING" = "$KVER" ] || die "kernel is $RUNNING, the ksmbd modules in $TAG are for $KVER.
+# install.sh runs this right after flashing, before the reboot: the new
+# kernel is on the boot partition but not running yet.  It sets SMB_DEFER=1;
+# we then install everything and leave the start to S99smb at the next boot.
+DEFER=0
+if [ "$RUNNING" != "$KVER" ]; then
+    if [ "${SMB_DEFER:-0}" = 1 ]; then
+        DEFER=1
+        say "==> kernel $RUNNING is running, $KVER is installed: the share starts after the reboot"
+    else
+        die "kernel is $RUNNING, the ksmbd modules in $TAG are for $KVER.
     Install the kernel from this repository first (install.sh)."
+    fi
+fi
 
 HOST=$(hostname 2>/dev/null || echo "?")
 say "==> $HOST, kernel $RUNNING"
@@ -109,8 +120,8 @@ fetch "$RAW/smb/wsdd.py"        "$WORK/wsdd.py"         "$WSDD_SHA"
 fetch "$RAW/smb/llmnrd.py"      "$WORK/llmnrd.py"       "$LLMNRD_SHA"
 say "    checksums ok"
 
-strings "$WORK/ksmbd.ko" | grep -q "^vermagic=$RUNNING " \
-    || die "ksmbd.ko in $TAG does not match the running kernel"
+strings "$WORK/ksmbd.ko" | grep -q "^vermagic=$KVER " \
+    || die "ksmbd.ko in $TAG does not match kernel $KVER"
 
 # ------------------------------------------------------------------ install
 
@@ -224,9 +235,14 @@ the target PC): disconnect SMB clients or run  /etc/init.d/S99smb stop
 NOTE
 say "    left a note in /root/README-smb.txt"
 
-"$INITD" restart
-sleep 2
-"$INITD" status >/dev/null || die "ksmbd did not start. See /var/log/smb.log."
+if [ "$DEFER" = 1 ]; then
+    say ""
+    say "==> installed; the share comes up with the new kernel after the reboot"
+else
+    "$INITD" restart
+    sleep 2
+    "$INITD" status >/dev/null || die "ksmbd did not start. See /var/log/smb.log."
+fi
 
 say ""
 say "==> share is up"

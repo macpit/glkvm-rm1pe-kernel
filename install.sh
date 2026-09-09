@@ -26,9 +26,9 @@
 set -eu
 
 REPO="macpit/glkvm-rm1pe-kernel"
-TAG="${TAG:-v31}"
+TAG="${TAG:-v32}"
 KERNEL_NAME="Image-6.1.141-${TAG}"
-KERNEL_SHA="d96cd811f8cf3888a5185b9c69f5e379f36888527584842a0135092a850581fd"
+KERNEL_SHA="3dccd5615bbc7ec0f3ba4f61a6d77bbb7c500a9478c262139a173191d142f1e1"
 PATCHER_SHA="dd7564615e1301e2cea804eadedd60bb1e03c6538cb74951510569406ce2a004"
 
 # The WLAN helper. Binaries and the driver module come from the release,
@@ -37,7 +37,7 @@ WPA_SHA="a402b6fdb369e0346e1a190ed9d936b46410091b17580eaadd47828235af914e"
 WPA_CLI_SHA="f362004682622b6147ff624ccc659ddddbc1e1d85fcb7776b3af6c69eac7ce8a"
 HOSTAPD_SHA="abf7148d86310e0ac4f45b00ef09eb6c6eafdc5ac792333423698e920f768cc4"
 DNSMASQ_SHA="358d7f82c708180cf39ff17baafec93410e3c284262fc84a86a9c26bbde6587c"
-MODULE_SHA="88514328082425ad1758071204f87e001e4066b936882c9aff39838598d30118"
+MODULE_SHA="3a33de192c3c94b3b8f1965fb7a8b73f19c61b2ea246f92d1a8a95f3a36274db"
 MENU_SHA="037db9f0c521a44e9e682a2c833fc00bf0bffb9552be5de46cd3c5b8bcfb0268"
 APPLY_SHA="ad3cc09f618f9331213a31bdc6ae299636d7b9cfc39f3ae89439d2f0b1f57eb6"
 APSTART_SHA="60c2966ca72b52f22fb3a3f45b4c334e0e81f1f1e2057b019b1c350768896048"
@@ -49,6 +49,7 @@ HOSTAPD_EXAMPLE_SHA="44302b7be29653a04021490ce527bb1861a149c304898d57c9947307ba3
 NGINX_BLOCK_SHA="856ee394674c2254e413aa3a0f5e7b4eccb952b0a85ab7d5dee301eb840d8a7c"
 PORTAL_SHA="c0dc9a3b0f70054e85332a30985bb41ca8f65ad4729c06f0b6f66d7fa64342e6"
 DISCOVERY_SHA="48cc7ff88b0754e0be102d9dd6989cea61d4ead487e1dfa67459ed4db6982bc2"
+SMB_SHA="4d39074e9f8e32ab43d3fa0a33725527959aaa9820874eeebeee1befb6d2efde"
 
 # Every ap-start.sh we have ever shipped, newest first. Anything not in this
 # list is treated as yours and left alone.
@@ -93,6 +94,7 @@ usage:
   install.sh --revert FILE    write FILE back into the boot partition
   -y, --yes                   do not ask for confirmation
       --no-wlan               do not install the WLAN helper
+      --no-smb                do not set up the SMB share of /userdata/media
 
 When piped straight into a shell, pass arguments after -s --, e.g.
   curl -sSL <url> | sh -s -- --list
@@ -103,6 +105,7 @@ MODE=install
 PICK=""
 ASSUME_YES=0
 WANT_WLAN=1
+WANT_SMB=1
 WLAN_OK=0
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -111,6 +114,7 @@ while [ $# -gt 0 ]; do
                      [ -n "$PICK" ] || die "--revert needs a file; try --list" ;;
         -y|--yes)    ASSUME_YES=1 ;;
         --no-wlan)   WANT_WLAN=0 ;;
+        --no-smb)    WANT_SMB=0 ;;
         -h|--help)   usage; exit 0 ;;
         *)           usage >&2; exit 1 ;;
     esac
@@ -446,6 +450,23 @@ install_discovery() {
     fi
 }
 
+# ------------------------------------------------------------------------- smb
+# Same reasoning as discovery: install-smb.sh is the one implementation.  It
+# needs this kernel (ksmbd modules), which is why it runs from here after the
+# flash; on a fresh device the new kernel is not running yet, so it just
+# installs the files and the share comes up after the reboot.
+install_smb() {
+    [ "$WANT_SMB" = 1 ] || return 0
+    [ "$WLAN_OK" = 1 ] || return 0
+    [ -f "$WORK/install-smb.sh" ] || return 0
+    say "==> SMB share"
+    if SMB_DEFER=1 BRANCH="$BRANCH" TAG="$TAG" sh "$WORK/install-smb.sh" 2>&1 | sed 's/^/    /'; then
+        :
+    else
+        say "    SMB setup failed; the kernel install is unaffected"
+    fi
+}
+
 # ------------------------------------------------------------------------ list
 if [ "$MODE" = list ]; then
     # boot-*.img, not just boot-backup-*.img: images put there by hand are just
@@ -548,7 +569,8 @@ if [ "$WANT_WLAN" = 1 ]; then
     && try_fetch "$RAW/wlan-ap/hostapd.conf.example" "$WORK/hostapd.conf.example" "$HOSTAPD_EXAMPLE_SHA" \
     && try_fetch "$RAW/wlan-ap/nginx-ap-block.conf"  "$WORK/nginx-ap-block.conf"  "$NGINX_BLOCK_SHA" \
     && try_fetch "$RAW/wlan-ap/portal/index.html" "$WORK/portal-index.html"  "$PORTAL_SHA" \
-    && try_fetch "$RAW/install-discovery.sh"      "$WORK/install-discovery.sh" "$DISCOVERY_SHA"
+    && try_fetch "$RAW/install-discovery.sh"      "$WORK/install-discovery.sh" "$DISCOVERY_SHA" \
+    && try_fetch "$RAW/install-smb.sh"            "$WORK/install-smb.sh"      "$SMB_SHA"
     then
         WLAN_OK=1
         say "    checksums ok"
@@ -595,6 +617,7 @@ fi
 
 install_wlan
 install_discovery
+install_smb
 
 epilogue
 say ""

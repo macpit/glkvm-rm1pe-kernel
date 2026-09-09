@@ -261,7 +261,8 @@ this repository is the practical way to a kernel you can actually modify.
 install.sh  one-line installer, runs on the device itself
 install-discovery.sh  standalone: makes any GL KVM visible in the Windows
             network view, no kernel required
-install-smb.sh  shares /userdata/media over SMB (ksmbd); needs this kernel
+install-smb.sh  shares /userdata/media over SMB (ksmbd); needs this kernel.
+            install.sh runs it too (--no-smb to skip)
 set-smb-password.sh  sets the password of the SMB user "admin", on the device
 patches/    the four patches, in order
 scripts/    build the FIT, install it, roll it back -- all over SSH
