@@ -23,7 +23,7 @@ set -eu
 
 REPO="macpit/glkvm-rm1pe-kernel"
 BRANCH="${BRANCH:-main}"
-TAG="${TAG:-v28}"
+TAG="${TAG:-v29}"
 RAW="https://raw.githubusercontent.com/$REPO/$BRANCH"
 REL="https://github.com/$REPO/releases/download/$TAG"
 
@@ -33,8 +33,9 @@ ARC4_SHA="e99a8f3671c9c38e6dfa678dc8fb4cd765e902488eb98d594c31999f6ca1d438"
 MD4_SHA="96adb3e3fdee262bb92fb0f159b8e9b00513dae733bde67e85924a9dab0db103"
 TOOLS_SHA="9b3d457ee8538f6f04ff72ef90dfe2f07bd9703fa7a5c955425a6f0b033a1460"
 # Scripts (from the branch)
-INITD_SHA="85628a1641d827a66d9412e9f24d0b47e4b16b7194ede04af9ce712b2d55c868"
+INITD_SHA="753b0b278ec79dcd2ca3d20dd7e9137c0162b268c9088955dbdccc14e6ff5750"
 SETPW_SHA="ccbb240741584e508c305b3f00a23f2353210d6eac05f7b3009d0857c7de3f6a"
+WSDD_SHA="54eca646850654301c89dfef78dc42ef07b98d28487fee51c93688d06a470be6"
 
 KVER="6.1.141"
 DIR="/userdata/smb"
@@ -103,6 +104,7 @@ fetch "$REL/cifs_md4.ko"        "$WORK/cifs_md4.ko"     "$MD4_SHA"
 fetch "$REL/ksmbd.tools"        "$WORK/ksmbd.tools"     "$TOOLS_SHA"
 fetch "$RAW/smb/S99smb"         "$WORK/S99smb"          "$INITD_SHA"
 fetch "$RAW/set-smb-password.sh" "$WORK/set-smb-password.sh" "$SETPW_SHA"
+fetch "$RAW/smb/wsdd.py"        "$WORK/wsdd.py"         "$WSDD_SHA"
 say "    checksums ok"
 
 strings "$WORK/ksmbd.ko" | grep -q "^vermagic=$RUNNING " \
@@ -118,7 +120,7 @@ put() {  # put <name> <mode>
     cp "$WORK/$1" "$DIR/.$1.new" && chmod "$2" "$DIR/.$1.new" && mv -f "$DIR/.$1.new" "$DIR/$1"
 }
 for f in ksmbd.ko cifs_arc4.ko cifs_md4.ko; do put "$f" 644; done
-for f in ksmbd.tools set-smb-password.sh; do put "$f" 755; done
+for f in ksmbd.tools set-smb-password.sh wsdd.py; do put "$f" 755; done
 # ksmbd-tools is a multi-call binary, dispatching on its name
 for t in mountd adduser control; do ln -sf ksmbd.tools "$DIR/ksmbd.$t"; done
 cp "$WORK/S99smb" "$INITD"

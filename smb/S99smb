@@ -19,6 +19,7 @@ PIDDIR=/var/run/smb-bonjour
 MOUNTD=$DIR/ksmbd.mountd
 CONTROL=$DIR/ksmbd.control
 VENDOR_MDNS_PID=/var/run/mDNSResponder-system.pid
+WSDD=$DIR/wsdd.py
 
 log() { echo "smb: $*" >> /var/log/smb.log; }
 
@@ -158,6 +159,69 @@ restore_vendor_mdns() {
     /usr/bin/mDNSResponder -b -n "$name" -P "$VENDOR_MDNS_PID" >/dev/null 2>&1
 }
 
+# ---------------------------------------------------------------- watchers
+#
+# index.html carries the current address as a fallback next to the stable
+# <hostname>.local link, so it goes stale when DHCP hands out a new lease.
+# connmand is the DHCP client here and has no dispatcher scripts, and the
+# udhcpc hook directories on the box are unused -- so watch the kernel's
+# address events directly.  `ip monitor` blocks until something happens; if
+# it is missing, fall back to a slow poll.
+
+watch_address() {
+    pgrep -f "$DIR/.smb-ipwatch" >/dev/null 2>&1 && return
+    cat > "$DIR/.smb-ipwatch" <<'WATCH'
+#!/bin/sh
+# Regenerate the share's index.html whenever this host's IPv4 address changes.
+# Started by /etc/init.d/S99smb; not meant to be run by hand.
+# Compare the whole address list, not just the first one: a lease change can
+# add or drop an address without the first entry moving.
+addrs() { ip -4 -o addr show dev eth0 2>/dev/null | awk '{print $4}' | sort | tr '\n' ' '; }
+cur=$(addrs)
+refresh() {
+    new=$(addrs)
+    [ "$new" = "$cur" ] && return
+    cur=$new
+    /etc/init.d/S99smb reload >/dev/null 2>&1
+    echo "smb: addresses now ${new:-none}-- index.html rewritten" >> /var/log/smb.log
+}
+# ip monitor blocks and prints a line per address event.  If it is not
+# available it returns at once and we fall through to polling.
+ip monitor address 2>/dev/null | while read -r _event; do
+    refresh
+done
+while :; do
+    sleep 60
+    refresh
+done
+WATCH
+    chmod 755 "$DIR/.smb-ipwatch"
+    setsid "$DIR/.smb-ipwatch" >/dev/null 2>&1 &
+    echo $! > "$PIDDIR/ipwatch.pid"
+}
+
+# Windows lists SMB hosts under "Computer" from WSD (Web Services Discovery),
+# not from the SSDP responder that puts the KVM under "Other Devices" -- that
+# one only carries the presentationURL, which is why a click there opens the
+# web GUI.  wsdd.py answers WSD probes so the share shows up as a computer.
+# Optional: if the file is not installed, everything else still works.
+#
+# Note for Windows 11: guest logons to SMB are refused by default
+# (AllowInsecureGuestAuth), so a double-click asks for credentials unless the
+# policy is changed -- use the admin account there.
+
+start_wsdd() {
+    [ -f "$WSDD" ] || return
+    pgrep -f "$WSDD" >/dev/null 2>&1 && return
+    command -v python3 >/dev/null 2>&1 || { log "no python3, skipping wsdd"; return; }
+    iface=$(ip -4 -o route show default 2>/dev/null | awk '{print $5}' | head -1)
+    [ -n "$iface" ] || iface=eth0
+    setsid python3 "$WSDD" -i "$iface" -n "$(hostname)" -w WORKGROUP -4 \
+        >> /var/log/wsdd.log 2>&1 &
+    echo $! > "$PIDDIR/wsdd.pid"
+    log "wsdd started on $iface"
+}
+
 start() {
     # ksmbd-tools is one multi-call binary; make sure the names exist
     if [ -x "$DIR/ksmbd.tools" ]; then
@@ -166,18 +230,28 @@ start() {
         done
     fi
     [ -x "$MOUNTD" ] || { log "$MOUNTD missing"; return 1; }
-    pgrep -f "$MOUNTD" >/dev/null && return 0
-    load_modules || return 1
-    gen_conf
-    gen_index
-    [ -f "$USERS" ] || touch "$USERS"
-    "$MOUNTD" -C "$CONF" -P "$USERS" || { log "ksmbd.mountd failed"; return 1; }
+
+    # Each of these is idempotent, so a second "start" repairs whatever is
+    # missing rather than bailing out because ksmbd happens to be up.
+    if ! pgrep -f "$MOUNTD" >/dev/null; then
+        load_modules || return 1
+        gen_conf
+        gen_index
+        [ -f "$USERS" ] || touch "$USERS"
+        # setsid: ksmbd.mountd daemonizes but stays in the caller's session,
+        # so starting it over ssh would let it die with that session.
+        setsid "$MOUNTD" -C "$CONF" -P "$USERS" || { log "ksmbd.mountd failed"; return 1; }
+    fi
     bonjour
+    watch_address
+    start_wsdd
     log "started"
 }
 
 stop() {
     restore_vendor_mdns
+    pkill -f "$DIR/.smb-ipwatch" 2>/dev/null
+    pkill -f "$WSDD" 2>/dev/null
     for p in "$PIDDIR"/*.pid; do
         [ -f "$p" ] && kill "$(cat "$p")" 2>/dev/null
     done

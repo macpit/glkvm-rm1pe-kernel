@@ -121,6 +121,46 @@ dns-sd -B _smb._tcp
 dns-sd -B _afpovertcp._tcp
 ```
 
+## Windows: "Computer" vs "Other Devices"
+
+Two different discovery protocols feed the Explorer's network view, and they
+land in different sections:
+
+* **Other Devices** comes from the SSDP responder of `install-discovery.sh`.
+  Its payload is a `presentationURL`, so a click there opens the web GUI.
+  That is all SSDP can do -- it says nothing about file shares.
+* **Computer** comes from **WSD** (Web Services Discovery, UDP 3702 /
+  TCP 5357).  Windows only lists SMB hosts there, and only if they answer WSD
+  probes.  NetBIOS browsing, the old alternative, is off by default on
+  Windows 11.
+
+`S99smb` therefore also runs [wsdd](https://github.com/christgau/wsdd) 0.9
+(`smb/wsdd.py`, a single dependency-free Python file, MIT).  The KVM then
+appears under Computer and a double-click opens the share.  wsdd is optional:
+if the file is missing, everything else still works and the device is still
+reachable as `\\<hostname>.local\media`.
+
+Windows 11 refuses guest logons to SMB out of the box.  Either connect as
+`admin`, or allow them:
+
+```
+reg add "HKLM\SYSTEM\CurrentControlSet\Services\LanmanWorkstation\Parameters" ^
+    /v AllowInsecureGuestAuth /t REG_DWORD /d 1 /f
+```
+
+## Keeping index.html current
+
+The page in the share links to `https://<hostname>.local/`, which never
+changes, and shows the current address underneath as a fallback -- and that
+one does change with a new DHCP lease.
+
+`S99smb` starts a small watcher (`/userdata/smb/.smb-ipwatch`) that follows
+`ip monitor address` and regenerates the page whenever the interface's
+address list changes; it degrades to a 60-second poll if `ip monitor` is
+unavailable.  The DHCP client on these devices is `connmand`, which has no
+dispatcher scripts, and the `udhcpc` hook directories in the firmware are
+unused -- watching the kernel's own events avoids depending on either.
+
 ## Caveat: kvmd's virtual-drive mode
 
 kvmd has two mass-storage functions on the USB gadget.  One serves a single
