@@ -20,6 +20,7 @@ MOUNTD=$DIR/ksmbd.mountd
 CONTROL=$DIR/ksmbd.control
 VENDOR_MDNS_PID=/var/run/mDNSResponder-system.pid
 WSDD=$DIR/wsdd.py
+LLMNRD=$DIR/llmnrd.py
 
 log() { echo "smb: $*" >> /var/log/smb.log; }
 
@@ -39,6 +40,18 @@ load_modules() {
     insmod "$DIR/ksmbd.ko" || { log "insmod ksmbd failed"; return 1; }
 }
 
+# Two settings here exist for the Windows client, see docs/smb.md:
+#   map to guest = never   -- an unknown user is refused instead of silently
+#                             mapped to guest.  Windows sends its logged-on
+#                             user first; a refusal makes the Explorer show a
+#                             credential prompt, a silent guest mapping makes
+#                             it fail with "cannot access" (since 24H2 a guest
+#                             session cannot satisfy the signing requirement).
+#                             Guests log in as the user "guest" (empty
+#                             password), created by install-smb.sh.
+#   smb3 encryption = disabled -- ksmbd 6.1 generates encryption keys for a
+#                             guest session too and lets ENCRYPT_DATA clobber
+#                             IS_GUEST in the session flags.
 gen_conf() {
     host=$(hostname)
     cat > "$CONF" <<CONF
@@ -46,7 +59,7 @@ gen_conf() {
 	netbios name = $host
 	server string = $host (GL KVM storage)
 	workgroup = WORKGROUP
-	map to guest = bad user
+	map to guest = never
 	guest account = nobody
 	server min protocol = SMB2_10
 	server max protocol = SMB3_11
@@ -54,6 +67,7 @@ gen_conf() {
 	smb2 max read = 4MB
 	smb2 max write = 4MB
 	restrict anonymous = 0
+	smb3 encryption = disabled
 
 [media]
 	comment = ISO images and files for the virtual drive
@@ -121,9 +135,22 @@ find_vendor_mdns() {  # echoes "<pid> <name>" of a vendor instance lacking -t
     return 1
 }
 
+vendor_mdns_fixed() {  # true if a vendor instance already carries -t _smb._tcp
+    for p in $(pgrep mDNSResponder 2>/dev/null); do
+        case "$(tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null)" in
+            *" -t _smb._tcp "*) return 0 ;;
+        esac
+    done
+    return 1
+}
+
 bonjour() {
     mkdir -p "$PIDDIR"
     host=$(hostname)
+
+    # Already done on an earlier start: registering again would announce the
+    # share twice and the Finder would show "<host> (2)".
+    vendor_mdns_fixed && return
 
     if found=$(find_vendor_mdns); then
         pid=${found%% *}
@@ -216,10 +243,26 @@ start_wsdd() {
     command -v python3 >/dev/null 2>&1 || { log "no python3, skipping wsdd"; return; }
     iface=$(ip -4 -o route show default 2>/dev/null | awk '{print $5}' | head -1)
     [ -n "$iface" ] || iface=eth0
-    setsid python3 "$WSDD" -i "$iface" -n "$(hostname)" -w WORKGROUP -4 \
+    setsid python3 "$WSDD" -i "$iface" -n "$(hostname)" -w WORKGROUP -p -4 \
         >> /var/log/wsdd.log 2>&1 &
     echo $! > "$PIDDIR/wsdd.pid"
     log "wsdd started on $iface"
+}
+
+# WSD only tells Windows the name.  To connect, Windows resolves a flat name
+# through DNS, then LLMNR (UDP 5355), then NetBIOS -- never through mDNS
+# unless the name ends in .local.  Without an LLMNR answer the Explorer lists
+# the KVM and then fails with "Windows cannot access \\<name>".  llmnrd.py
+# answers for this host's own name only.
+start_llmnrd() {
+    [ -f "$LLMNRD" ] || return
+    pgrep -f "$LLMNRD" >/dev/null 2>&1 && return
+    command -v python3 >/dev/null 2>&1 || return
+    iface=$(ip -4 -o route show default 2>/dev/null | awk '{print $5}' | head -1)
+    [ -n "$iface" ] || iface=eth0
+    setsid python3 "$LLMNRD" "$iface" "$(hostname)" >> /var/log/llmnrd.log 2>&1 &
+    echo $! > "$PIDDIR/llmnrd.pid"
+    log "llmnrd started on $iface"
 }
 
 start() {
@@ -245,6 +288,7 @@ start() {
     bonjour
     watch_address
     start_wsdd
+    start_llmnrd
     log "started"
 }
 
@@ -252,6 +296,7 @@ stop() {
     restore_vendor_mdns
     pkill -f "$DIR/.smb-ipwatch" 2>/dev/null
     pkill -f "$WSDD" 2>/dev/null
+    pkill -f "$LLMNRD" 2>/dev/null
     for p in "$PIDDIR"/*.pid; do
         [ -f "$p" ] && kill "$(cat "$p")" 2>/dev/null
     done

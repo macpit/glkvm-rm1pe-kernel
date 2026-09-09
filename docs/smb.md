@@ -20,11 +20,12 @@ Needs the custom kernel from this repository (see below for why), so run
 |------------------|------------------|------------|--------------|
 | `media`          | `/userdata/media`| read       | read + write |
 
-* **Guests** connect without any password.  On macOS click the device in the
-  Finder's Network list, or `smb://<hostname>.local/media`.  Windows 11
-  refuses guest logons to SMB shares by default (`AllowInsecureGuestAuth`);
-  connect as `admin` there, or allow insecure guest logons in the group
-  policy / registry.
+* **Guests** connect as the user `guest` with an empty password -- that is
+  what the macOS Finder's "Guest" button and `smb://guest@<host>/media` send.
+  Anonymous (null-session) access reads too.  The installer creates `guest`,
+  `Guest` and `GUEST`, because ksmbd matches names case-sensitively and
+  clients differ in what they send.
+  **Windows 11 cannot use guest access at all** since 24H2 -- see below.
 * **`admin`** may write.  The installer creates the user with a random
   password and prints it once.  Change it any time on the device with
 
@@ -135,18 +136,54 @@ land in different sections:
   Windows 11.
 
 `S99smb` therefore also runs [wsdd](https://github.com/christgau/wsdd) 0.9
-(`smb/wsdd.py`, a single dependency-free Python file, MIT).  The KVM then
-appears under Computer and a double-click opens the share.  wsdd is optional:
+(`smb/wsdd.py`, a single dependency-free Python file, MIT), as a member of
+`WORKGROUP` with the hostname's case preserved.  Do not use wsdd's `-d` to
+put it in a "domain" -- the Explorer files domain members elsewhere and the
+KVM vanishes from the list.  The KVM then appears under Computer.  wsdd is optional:
 if the file is missing, everything else still works and the device is still
 reachable as `\\<hostname>.local\media`.
 
-Windows 11 refuses guest logons to SMB out of the box.  Either connect as
-`admin`, or allow them:
+WSD only carries the *name*.  To connect, Windows resolves a flat name
+through DNS, then LLMNR (UDP 5355), then NetBIOS -- and never through mDNS
+unless the name ends in `.local`.  So `S99smb` also runs `smb/llmnrd.py`, a
+40-line LLMNR responder that answers for this host's own name and nothing
+else (an LLMNR responder that answers for arbitrary names is a credential-
+harvesting tool, which is why the name check is strict).  Without it the
+Explorer lists the KVM and then fails with "Windows cannot access \\<name>".
 
-```
-reg add "HKLM\SYSTEM\CurrentControlSet\Services\LanmanWorkstation\Parameters" ^
-    /v AllowInsecureGuestAuth /t REG_DWORD /d 1 /f
-```
+### Guest access from Windows 11 is dead since 24H2
+
+Windows 11 24H2 made SMB signing mandatory for every outbound connection
+(`Get-SmbClientConfiguration` shows `RequireSecuritySignature : True`).  A
+guest session has no session key by protocol design, so it cannot sign, and
+the client drops it right after session setup -- event 31013 "The signing
+validation failed" in `Microsoft-Windows-SmbClient/Security`.  This is a
+property of the Windows client: the same happens against Samba, a Synology,
+or a Windows server.  `AllowInsecureGuestAuth` opens a different door and
+does not help here.
+
+What to do on Windows:
+
+* connect as `admin` and tick "Remember my credentials", or store them once
+  with `cmdkey /add:<hostname> /user:admin /pass:<password>` -- after that
+  even the icon in the Network view opens the share directly, or
+* on a test machine only, drop the signing requirement:
+  `Set-SmbClientConfiguration -RequireSecuritySignature $false -Force`.
+  This weakens every SMB connection of that machine, not just this one.
+
+Two ksmbd settings exist for the Windows client and are set by `S99smb`:
+
+* `map to guest = never`.  Windows sends its logged-on user first.  With
+  `bad user`, ksmbd silently mapped that unknown name to guest, the guest
+  session then failed the signing check, and the Explorer reported
+  "cannot access" -- a network error, no credential prompt.  With `never`
+  the unknown name is refused with `LOGON_FAILURE`, which is what makes the
+  Explorer show its credential dialog.  Guests still get in, as the user
+  `guest`.
+* `smb3 encryption = disabled`.  ksmbd 6.1 generates encryption keys for a
+  guest session too and lets `ENCRYPT_DATA` clobber `IS_GUEST` in the
+  session flags, which confuses clients.  Nothing here needs encryption on
+  the wire.
 
 ## Keeping index.html current
 

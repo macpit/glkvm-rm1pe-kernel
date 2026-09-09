@@ -23,7 +23,7 @@ set -eu
 
 REPO="macpit/glkvm-rm1pe-kernel"
 BRANCH="${BRANCH:-main}"
-TAG="${TAG:-v29}"
+TAG="${TAG:-v30}"
 RAW="https://raw.githubusercontent.com/$REPO/$BRANCH"
 REL="https://github.com/$REPO/releases/download/$TAG"
 
@@ -33,9 +33,10 @@ ARC4_SHA="e99a8f3671c9c38e6dfa678dc8fb4cd765e902488eb98d594c31999f6ca1d438"
 MD4_SHA="96adb3e3fdee262bb92fb0f159b8e9b00513dae733bde67e85924a9dab0db103"
 TOOLS_SHA="9b3d457ee8538f6f04ff72ef90dfe2f07bd9703fa7a5c955425a6f0b033a1460"
 # Scripts (from the branch)
-INITD_SHA="753b0b278ec79dcd2ca3d20dd7e9137c0162b268c9088955dbdccc14e6ff5750"
+INITD_SHA="1eaf92dae21d5f79d0c17b6636feaf3c99be3a3f5ad3b03fda47ec4751b48338"
 SETPW_SHA="ccbb240741584e508c305b3f00a23f2353210d6eac05f7b3009d0857c7de3f6a"
 WSDD_SHA="54eca646850654301c89dfef78dc42ef07b98d28487fee51c93688d06a470be6"
+LLMNRD_SHA="a9f03fbe3950266727699e2169bb013b29ca6ee1ef86ca6b067d0c0d9becdb3f"
 
 KVER="6.1.141"
 DIR="/userdata/smb"
@@ -105,6 +106,7 @@ fetch "$REL/ksmbd.tools"        "$WORK/ksmbd.tools"     "$TOOLS_SHA"
 fetch "$RAW/smb/S99smb"         "$WORK/S99smb"          "$INITD_SHA"
 fetch "$RAW/set-smb-password.sh" "$WORK/set-smb-password.sh" "$SETPW_SHA"
 fetch "$RAW/smb/wsdd.py"        "$WORK/wsdd.py"         "$WSDD_SHA"
+fetch "$RAW/smb/llmnrd.py"      "$WORK/llmnrd.py"       "$LLMNRD_SHA"
 say "    checksums ok"
 
 strings "$WORK/ksmbd.ko" | grep -q "^vermagic=$RUNNING " \
@@ -120,7 +122,7 @@ put() {  # put <name> <mode>
     cp "$WORK/$1" "$DIR/.$1.new" && chmod "$2" "$DIR/.$1.new" && mv -f "$DIR/.$1.new" "$DIR/$1"
 }
 for f in ksmbd.ko cifs_arc4.ko cifs_md4.ko; do put "$f" 644; done
-for f in ksmbd.tools set-smb-password.sh wsdd.py; do put "$f" 755; done
+for f in ksmbd.tools set-smb-password.sh wsdd.py llmnrd.py; do put "$f" 755; done
 # ksmbd-tools is a multi-call binary, dispatching on its name
 for t in mountd adduser control; do ln -sf ksmbd.tools "$DIR/ksmbd.$t"; done
 cp "$WORK/S99smb" "$INITD"
@@ -129,8 +131,17 @@ say "==> installed $DIR and $INITD"
 
 # ------------------------------------------------------------- admin user
 
+# Guests log in as "guest" with an empty password (map to guest = never
+# refuses unknown names, so the Windows Explorer shows a credential prompt
+# instead of failing).  ksmbd matches names case-sensitively and macOS
+# sends "Guest", so create the spellings clients actually use.
+for g in guest Guest GUEST; do
+    grep -q "^$g:" "$DIR/ksmbdpwd.db" 2>/dev/null \
+        || "$DIR/ksmbd.adduser" -P "$DIR/ksmbdpwd.db" -p "" -a "$g" >/dev/null 2>&1
+done
+
 NEWPW=""
-if [ ! -s "$DIR/ksmbdpwd.db" ]; then
+if ! grep -q "^admin:" "$DIR/ksmbdpwd.db" 2>/dev/null; then
     NEWPW=$(head -c 12 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 12)
     sh "$DIR/set-smb-password.sh" "$NEWPW" >/dev/null
     say "==> created SMB user admin"
