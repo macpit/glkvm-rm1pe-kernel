@@ -27,7 +27,7 @@ REPO="macpit/glkvm-rm1pe-kernel"
 BRANCH="${BRANCH:-main}"
 RAW="https://raw.githubusercontent.com/$REPO/$BRANCH"
 
-SSDP_SHA="587d82f4e922a54e6d2e0d679f63d7a2a77c42648711b328e5a9407d6fdc7555"
+SSDP_SHA="1d13124505964c7c56af1b2c168ef9413c7f3c7f18f44707120f0d496fc1a631"
 INITD_SHA="a325f62f94f3a7800d3479d2a12fdc8674fd116e090f09059e0b202c9f0570f0"
 
 DIR="/userdata/discovery"

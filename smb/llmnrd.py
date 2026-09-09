@@ -14,10 +14,12 @@ name server -- answering for other names would hijack them on the segment.
 Started by /etc/init.d/S99smb.
 """
 
+import errno
 import socket
 import struct
 import sys
 import subprocess
+import time
 
 PORT = 5355
 GROUP = '224.0.0.252'
@@ -87,8 +89,17 @@ def main():
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sock.bind(('', PORT))
-    sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP,
-                    socket.inet_aton(GROUP) + socket.inet_aton('0.0.0.0'))
+    # Joining the group needs an interface with an address; at boot DHCP may
+    # not be done yet (ENODEV).  Wait for it instead of dying.
+    mreq = socket.inet_aton(GROUP) + socket.inet_aton('0.0.0.0')
+    for attempt in range(150):
+        try:
+            sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+            break
+        except OSError as e:
+            if e.errno != errno.ENODEV or attempt == 149:
+                raise
+            time.sleep(2)
     print(f'llmnrd: answering for {name} on {iface}', flush=True)
 
     while True:

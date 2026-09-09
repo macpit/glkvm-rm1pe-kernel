@@ -48,8 +48,8 @@ RESTARTCAP_SHA="e733fb8373522519c2085339ab1dd2049036b8293221b0e475d931ed84ad80bc
 HOSTAPD_EXAMPLE_SHA="44302b7be29653a04021490ce527bb1861a149c304898d57c9947307ba377c46"
 NGINX_BLOCK_SHA="856ee394674c2254e413aa3a0f5e7b4eccb952b0a85ab7d5dee301eb840d8a7c"
 PORTAL_SHA="c0dc9a3b0f70054e85332a30985bb41ca8f65ad4729c06f0b6f66d7fa64342e6"
-DISCOVERY_SHA="48cc7ff88b0754e0be102d9dd6989cea61d4ead487e1dfa67459ed4db6982bc2"
-SMB_SHA="4d39074e9f8e32ab43d3fa0a33725527959aaa9820874eeebeee1befb6d2efde"
+DISCOVERY_SHA="d91d5d3f321160fc788470ffe1e6e6dd80a6f4b9efad9d0737d241f2554e2d33"
+SMB_SHA="c407d009f4173c19113cb355f232f3e4fd3f02b726878686afd20265f76279c2"
 
 # Every ap-start.sh we have ever shipped, newest first. Anything not in this
 # list is treated as yours and left alone.
@@ -395,9 +395,13 @@ install_wlan() {
     chmod 600 "$MOD_DIR/8188eu.ko"
     check_module_vermagic
 
+    # Replace by rename: a running hostapd/wpa_supplicant cannot be
+    # overwritten in place (ETXTBSY), and bailing out here used to skip the
+    # init script, hostapd.conf and the nginx block that follow.
     for f in wpa_supplicant wpa_cli hostapd dnsmasq wlan-menu.py wlan-apply.sh \
              captive.py restart-cap.sh; do
-        cp "$WORK/$f" "$WLAN_DIR/$f" && chmod 700 "$WLAN_DIR/$f" \
+        cp "$WORK/$f" "$WLAN_DIR/.$f.new" && chmod 700 "$WLAN_DIR/.$f.new" \
+            && mv -f "$WLAN_DIR/.$f.new" "$WLAN_DIR/$f" \
             || { say "    could not write $f, skipped"; return 0; }
     done
     cp "$WORK/dnsmasq.conf" "$WLAN_DIR/dnsmasq.conf" && chmod 600 "$WLAN_DIR/dnsmasq.conf"

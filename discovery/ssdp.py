@@ -19,6 +19,7 @@ import http.server
 import os
 import re
 import signal
+import errno
 import socket
 import struct
 import sys
@@ -188,7 +189,17 @@ def make_socket():
     s.bind(("", SSDP_PORT))
     s.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 4)
     mreq = struct.pack("4sl", socket.inet_aton(SSDP_ADDR), socket.INADDR_ANY)
-    s.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+    # At boot this runs before DHCP has given eth0 an address, and joining a
+    # multicast group with no usable interface fails with ENODEV.  Wait for
+    # the address rather than die: the init hook that starts us does not.
+    for attempt in range(150):
+        try:
+            s.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+            break
+        except OSError as e:
+            if e.errno != errno.ENODEV or attempt == 149:
+                raise
+            time.sleep(2)
     return s
 
 
