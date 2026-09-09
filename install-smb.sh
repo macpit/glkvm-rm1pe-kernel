@@ -223,8 +223,13 @@ Guests:     user "guest", empty password -- read only
 Admin:      user "admin" -- read and write
 
 Change the admin password:
+    python3 /userdata/wlan-ap/wlan-menu.py          (menu, item 6)
     sh /userdata/smb/set-smb-password.sh            (prompts twice)
     sh /userdata/smb/set-smb-password.sh 'secret'   (non-interactive)
+
+The same menu switches the WLAN between access point and client mode,
+changes the hostname and the AP SSID/passphrase.  A hostname change is
+picked up by SMB, mDNS, SSDP and WSD within about 15 seconds.
 
 Service:    /etc/init.d/S99smb  start|stop|restart|status
 Log:        /var/log/smb.log
