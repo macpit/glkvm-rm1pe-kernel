@@ -111,10 +111,14 @@ strings "$WORK/ksmbd.ko" | grep -q "^vermagic=$RUNNING " \
 # ------------------------------------------------------------------ install
 
 mkdir -p "$DIR"
-for f in ksmbd.ko cifs_arc4.ko cifs_md4.ko; do cp "$WORK/$f" "$DIR/$f"; chmod 644 "$DIR/$f"; done
-for f in ksmbd.tools set-smb-password.sh; do
-    cp "$WORK/$f" "$DIR/$f"; chmod 755 "$DIR/$f"
-done
+# A running ksmbd.tools cannot be overwritten in place (ETXTBSY); stop the
+# service first and replace files by rename.
+[ -x "$INITD" ] && "$INITD" stop >/dev/null 2>&1 || true
+put() {  # put <name> <mode>
+    cp "$WORK/$1" "$DIR/.$1.new" && chmod "$2" "$DIR/.$1.new" && mv -f "$DIR/.$1.new" "$DIR/$1"
+}
+for f in ksmbd.ko cifs_arc4.ko cifs_md4.ko; do put "$f" 644; done
+for f in ksmbd.tools set-smb-password.sh; do put "$f" 755; done
 # ksmbd-tools is a multi-call binary, dispatching on its name
 for t in mountd adduser control; do ln -sf ksmbd.tools "$DIR/ksmbd.$t"; done
 cp "$WORK/S99smb" "$INITD"
