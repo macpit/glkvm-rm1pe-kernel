@@ -153,12 +153,16 @@ bonjour() {
     vendor_mdns_fixed && return
 
     if found=$(find_vendor_mdns); then
-        pid=${found%% *}
-        name=${found#* }
-        [ -n "$name" ] || name=$host
-        echo "$name" > "$PIDDIR/vendor-mdns-name"
-        kill "$pid" 2>/dev/null
-        sleep 1
+        orig=${found#* }
+        [ -n "$orig" ] || orig=$host
+        [ -f "$PIDDIR/vendor-mdns-name" ] || echo "$orig" > "$PIDDIR/vendor-mdns-name"
+        name=$host                      # current hostname, not the old -n
+        # There may be more than one (the firmware restarts its own on a
+        # hostname change while ours is still up); retire them all.
+        while found=$(find_vendor_mdns); do
+            kill "${found%% *}" 2>/dev/null
+            sleep 1
+        done
         rm -f "$VENDOR_MDNS_PID"
         /usr/bin/mDNSResponder -b -n "$name" -t _smb._tcp -p 445 \
             -P "$VENDOR_MDNS_PID" >/dev/null 2>&1
@@ -181,8 +185,11 @@ restore_vendor_mdns() {
         case "$args" in *" -t _smb._tcp "*) kill "$p" 2>/dev/null ;; esac
     done
     sleep 1
+    # If the firmware has meanwhile started its own instance (gl_mdns does
+    # on a hostname change), leave it; otherwise put the original back,
+    # AFP default and all.
+    find_vendor_mdns >/dev/null && return
     rm -f "$VENDOR_MDNS_PID"
-    # Back to the firmware's own invocation, AFP default and all.
     /usr/bin/mDNSResponder -b -n "$name" -P "$VENDOR_MDNS_PID" >/dev/null 2>&1
 }
 
@@ -205,6 +212,7 @@ watch_address() {
 # add or drop an address without the first entry moving.
 addrs() { ip -4 -o addr show dev eth0 2>/dev/null | awk '{print $4}' | sort | tr '\n' ' '; }
 cur=$(addrs)
+host=$(hostname)
 refresh() {
     new=$(addrs)
     [ "$new" = "$cur" ] && return
@@ -212,13 +220,38 @@ refresh() {
     /etc/init.d/S99smb reload >/dev/null 2>&1
     echo "smb: addresses now ${new:-none}-- index.html rewritten" >> /var/log/smb.log
 }
-# ip monitor blocks and prints a line per address event.  If it is not
-# available it returns at once and we fall through to polling.
-ip monitor address 2>/dev/null | while read -r _event; do
-    refresh
-done
+# A hostname change (web GUI, "Hostname") is baked into everything here:
+# the SMB server name, the WSD/LLMNR names, index.html, and the mDNS
+# registration -- which the GUI's own 'gl_mdns system restart' brings
+# back with the AFP default.  So restart the lot, detached, and let the
+# new S99smb spawn a fresh watcher (restart kills this one).
+check_hostname() {
+    h=$(hostname)
+    [ "$h" = "$host" ] && return
+    echo "smb: hostname $host -> $h, restarting discovery" >> /var/log/smb.log
+    setsid sh -c 'sleep 2; /etc/init.d/S99smb restart; /etc/init.d/S99discovery restart' \
+        >/dev/null 2>&1 < /dev/null &
+    exit 0
+}
+# The vendor mDNS instance may also be restarted without a hostname
+# change; then it announces AFP again.  A plain start repairs that (every
+# step in start is idempotent).
+check_vendor_mdns() {
+    for p in $(pgrep mDNSResponder 2>/dev/null); do
+        case "$(tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null)" in
+            *" -t "*) ;;
+            *" -n "*) /etc/init.d/S99smb start >/dev/null 2>&1; return ;;
+        esac
+    done
+}
+# ip monitor blocks and prints a line per address event; run it in the
+# background so the poll below can watch the hostname as well.  If ip
+# monitor is unavailable the pipe just ends and polling covers addresses.
+( ip monitor address 2>/dev/null | while read -r _event; do refresh; done ) &
 while :; do
-    sleep 60
+    sleep 15
+    check_hostname
+    check_vendor_mdns
     refresh
 done
 WATCH
@@ -295,6 +328,7 @@ start() {
 stop() {
     restore_vendor_mdns
     pkill -f "$DIR/.smb-ipwatch" 2>/dev/null
+    pkill -f "ip monitor address" 2>/dev/null
     pkill -f "$WSDD" 2>/dev/null
     pkill -f "$LLMNRD" 2>/dev/null
     for p in "$PIDDIR"/*.pid; do

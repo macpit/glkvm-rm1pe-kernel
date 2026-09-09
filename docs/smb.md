@@ -185,6 +185,16 @@ Two ksmbd settings exist for the Windows client and are set by `S99smb`:
   session flags, which confuses clients.  Nothing here needs encryption on
   the wire.
 
+## Hostname changes
+
+Changing the hostname in the web GUI writes `/etc/hostname` and runs
+`gl_mdns system restart` -- which brings the vendor mDNS instance back with
+the AFP default (see above).  The watcher started by `S99smb` polls the
+hostname every 15 s; on a change it restarts `S99smb` and `S99discovery`
+detached, so the SMB server name, the WSD/LLMNR names, `index.html`, the
+SSDP description and the mDNS registration all follow.  It also repairs the
+vendor instance if it comes back without `-t` for any other reason.
+
 ## Keeping index.html current
 
 The page in the share links to `https://<hostname>.local/`, which never

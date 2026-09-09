@@ -23,7 +23,7 @@ set -eu
 
 REPO="macpit/glkvm-rm1pe-kernel"
 BRANCH="${BRANCH:-main}"
-TAG="${TAG:-v30}"
+TAG="${TAG:-v31}"
 RAW="https://raw.githubusercontent.com/$REPO/$BRANCH"
 REL="https://github.com/$REPO/releases/download/$TAG"
 
@@ -33,7 +33,7 @@ ARC4_SHA="e99a8f3671c9c38e6dfa678dc8fb4cd765e902488eb98d594c31999f6ca1d438"
 MD4_SHA="96adb3e3fdee262bb92fb0f159b8e9b00513dae733bde67e85924a9dab0db103"
 TOOLS_SHA="9b3d457ee8538f6f04ff72ef90dfe2f07bd9703fa7a5c955425a6f0b033a1460"
 # Scripts (from the branch)
-INITD_SHA="1eaf92dae21d5f79d0c17b6636feaf3c99be3a3f5ad3b03fda47ec4751b48338"
+INITD_SHA="970436eb7914519a1d5ccd96734bb8d37e7d6810c2849500a257d176a0e90e82"
 SETPW_SHA="ccbb240741584e508c305b3f00a23f2353210d6eac05f7b3009d0857c7de3f6a"
 WSDD_SHA="54eca646850654301c89dfef78dc42ef07b98d28487fee51c93688d06a470be6"
 LLMNRD_SHA="a9f03fbe3950266727699e2169bb013b29ca6ee1ef86ca6b067d0c0d9becdb3f"
@@ -62,7 +62,7 @@ uninstall() {
         fi
     done
 
-    rm -f "$INITD" /userdata/media/index.html
+    rm -f "$INITD" /userdata/media/index.html /root/README-smb.txt
     rm -rf "$DIR"
     say "    removed $INITD and $DIR (the user database went with it)"
     exit 0
@@ -200,6 +200,29 @@ if ! plant_boot_call; then
 fi
 
 # --------------------------------------------------------------------- start
+
+cat > /root/README-smb.txt <<'NOTE'
+SMB share of this KVM  (installed by install-smb.sh)
+====================================================
+
+Share:      \\<hostname>\media   =   /userdata/media   (ISO images)
+Guests:     user "guest", empty password -- read only
+            (macOS Finder "Guest" works; Windows 11 24H2+ cannot do
+             guest at all, log in as admin there)
+Admin:      user "admin" -- read and write
+
+Change the admin password:
+    sh /userdata/smb/set-smb-password.sh            (prompts twice)
+    sh /userdata/smb/set-smb-password.sh 'secret'   (non-interactive)
+
+Service:    /etc/init.d/S99smb  start|stop|restart|status
+Log:        /var/log/smb.log
+Docs:       https://github.com/macpit/glkvm-rm1pe-kernel/blob/main/docs/smb.md
+
+Before switching the web GUI to "virtual drive" mode (whole partition to
+the target PC): disconnect SMB clients or run  /etc/init.d/S99smb stop
+NOTE
+say "    left a note in /root/README-smb.txt"
 
 "$INITD" restart
 sleep 2
