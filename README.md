@@ -52,6 +52,7 @@ verify.
 | Access point | hostapd + dnsmasq + a captive portal that shows the KVM address |
 | Client mode | Join an existing WLAN, with a menu to switch and a watchdog that puts the AP back if it fails |
 | Discovery | Reachable as `<hostname>.local`, and listed in the Windows network view via SSDP -- see [docs/discovery.md](docs/discovery.md) |
+| SMB share | The ISO storage as `\\<hostname>\media`: guests read, `admin` writes, the device shows up in the macOS Finder -- see [docs/smb.md](docs/smb.md) |
 | Vendor modules | All six load: `kmpp`, `kmpp_smart`, `rockit*`, `gl-hw-info` |
 | Streaming | Unchanged: kvmd, ustreamer, WebRTC over the vendor pipeline |
 
@@ -260,16 +261,20 @@ this repository is the practical way to a kernel you can actually modify.
 install.sh  one-line installer, runs on the device itself
 install-discovery.sh  standalone: makes any GL KVM visible in the Windows
             network view, no kernel required
+install-smb.sh  shares /userdata/media over SMB (ksmbd); needs this kernel
+set-smb-password.sh  sets the password of the SMB user "admin", on the device
 patches/    the four patches, in order
 scripts/    build the FIT, install it, roll it back -- all over SSH
             patch-fit.py swaps the kernel inside an existing FIT, on the device
             build-userland.sh cross-builds hostapd, dnsmasq and wpa_supplicant
             build-8188eu.sh builds the WLAN driver against your kernel tree
+            build-ksmbd.sh builds the ksmbd modules and the static ksmbd-tools
 wlan-ap/    access point, client mode and captive portal, ready to drop into
             /userdata -- wlan-menu.py is the thing you actually run
 discovery/  the SSDP responder and its init script
+smb/        the ksmbd init script
 docs/       dev-machine, device-only, build, recovery, the LT6911C driver,
-            WLAN, network discovery
+            WLAN, network discovery, SMB share
 ```
 
 ## Planned

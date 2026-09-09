@@ -1,0 +1,142 @@
+#!/bin/sh
+# SMB share of the KVM's ISO storage (/userdata/media) via ksmbd.
+# Installed as /etc/init.d/S99smb, started from a firmware init script
+# (see install-smb.sh -- rcS globs before the overlay is mounted).
+#
+# Guests get read-only access without a password; the user "admin"
+# (see set-smb-password.sh) may write.  A small index.html in the share
+# links to the web GUI so the share is a landing page too.
+#
+# Caveat: kvmd's "virtual drive" mode umounts /userdata/media to hand the
+# whole partition to the target PC.  A connected SMB client keeps the mount
+# busy, so disconnect clients first (or `S99smb stop`).
+
+DIR=/userdata/smb
+MEDIA=/userdata/media
+CONF=/var/run/ksmbd.conf
+USERS=$DIR/ksmbdpwd.db
+PIDDIR=/var/run/smb-bonjour
+MOUNTD=$DIR/ksmbd.mountd
+CONTROL=$DIR/ksmbd.control
+
+log() { echo "smb: $*" >> /var/log/smb.log; }
+
+load_modules() {
+    lsmod | grep -q '^ksmbd ' && return 0
+    kver=$(uname -r)
+    for m in cifs_arc4 cifs_md4 ksmbd; do
+        f="$DIR/$m.ko"
+        [ -f "$f" ] || { log "missing $f"; return 1; }
+        if ! strings "$f" | grep -q "^vermagic=$kver "; then
+            log "$m.ko was built for another kernel (need $kver) -- not loading"
+            return 1
+        fi
+    done
+    insmod "$DIR/cifs_arc4.ko" 2>/dev/null
+    insmod "$DIR/cifs_md4.ko" 2>/dev/null
+    insmod "$DIR/ksmbd.ko" || { log "insmod ksmbd failed"; return 1; }
+}
+
+gen_conf() {
+    host=$(hostname)
+    cat > "$CONF" <<CONF
+[global]
+	netbios name = $host
+	server string = $host (GL KVM storage)
+	workgroup = WORKGROUP
+	map to guest = bad user
+	guest account = nobody
+	server min protocol = SMB2_10
+	server max protocol = SMB3_11
+	ipc timeout = 20
+	smb2 max read = 4MB
+	smb2 max write = 4MB
+	restrict anonymous = 0
+
+[media]
+	comment = ISO images and files for the virtual drive
+	path = $MEDIA
+	browseable = yes
+	guest ok = yes
+	read only = yes
+	write list = admin
+	force user = root
+	force group = root
+	create mask = 0644
+	directory mask = 0755
+	veto files = /.DS_Store/._*/.Spotlight-V100/.fseventsd/.Trashes/
+CONF
+}
+
+gen_index() {
+    host=$(hostname)
+    ip=$(ip -4 -o addr show dev eth0 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -1)
+    model=$(grep RK_MODEL /etc/version 2>/dev/null | cut -d= -f2 | tr -d ' ')
+    [ -w "$MEDIA" ] || return
+    cat > "$MEDIA/index.html" <<HTML
+<!doctype html>
+<meta charset="utf-8">
+<meta http-equiv="refresh" content="3;url=https://$host.local/">
+<title>$host</title>
+<style>body{font:16px/1.5 -apple-system,Segoe UI,sans-serif;max-width:40em;margin:4em auto;padding:0 1em;color:#222}a{color:#0a66c2}code{background:#f3f3f3;padding:2px 5px;border-radius:3px}</style>
+<h1>$host</h1>
+<p>GL KVM ${model:+($model)} &mdash; ISO storage share.</p>
+<p>Web GUI: <a href="https://$host.local/">https://$host.local/</a></p>
+${ip:+<p>Fallback by address: <a href="http://$ip/">http://$ip/</a> <small>(as of last boot, may change with DHCP)</small></p>}
+<p>Guests may read this share. To copy ISOs here connect as user <code>admin</code>.</p>
+<p><small>Redirecting to the web GUI in 3 seconds&hellip;</small></p>
+HTML
+}
+
+bonjour() {
+    # Make the Finder show the device under Network: _smb._tcp is what it
+    # browses for; _device-info gives it a name/icon hint.
+    command -v dns-sd >/dev/null 2>&1 || return
+    mkdir -p "$PIDDIR"
+    host=$(hostname)
+    dns-sd -R "$host" _smb._tcp local 445 >/dev/null 2>&1 &
+    echo $! > "$PIDDIR/smb.pid"
+    dns-sd -R "$host" _device-info._tcp local 0 model=RackMac >/dev/null 2>&1 &
+    echo $! > "$PIDDIR/devinfo.pid"
+}
+
+start() {
+    # ksmbd-tools is one multi-call binary; make sure the names exist
+    if [ -x "$DIR/ksmbd.tools" ]; then
+        for t in mountd adduser control; do
+            [ -e "$DIR/ksmbd.$t" ] || ln -s ksmbd.tools "$DIR/ksmbd.$t"
+        done
+    fi
+    [ -x "$MOUNTD" ] || { log "$MOUNTD missing"; return 1; }
+    pgrep -f "$MOUNTD" >/dev/null && return 0
+    load_modules || return 1
+    gen_conf
+    gen_index
+    [ -f "$USERS" ] || touch "$USERS"
+    "$MOUNTD" -C "$CONF" -P "$USERS" || { log "ksmbd.mountd failed"; return 1; }
+    bonjour
+    log "started"
+}
+
+stop() {
+    for p in "$PIDDIR"/*.pid; do
+        [ -f "$p" ] && kill "$(cat "$p")" 2>/dev/null
+    done
+    rm -rf "$PIDDIR"
+    [ -x "$CONTROL" ] && "$CONTROL" -s 2>/dev/null
+    pkill -f "$MOUNTD" 2>/dev/null
+    sleep 1
+    rmmod ksmbd 2>/dev/null
+    rmmod cifs_md4 2>/dev/null
+    rmmod cifs_arc4 2>/dev/null
+    log "stopped"
+}
+
+case "${1:-start}" in
+  start)   start ;;
+  stop)    stop ;;
+  restart) stop; sleep 1; start ;;
+  reload)  gen_conf; gen_index; [ -x "$CONTROL" ] && "$CONTROL" -r ;;
+  status)
+    if pgrep -f "$MOUNTD" >/dev/null; then echo "smb: running"; else echo "smb: stopped"; exit 1; fi ;;
+esac
