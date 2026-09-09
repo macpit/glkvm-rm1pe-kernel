@@ -23,17 +23,17 @@ set -eu
 
 REPO="macpit/glkvm-rm1pe-kernel"
 BRANCH="${BRANCH:-main}"
-TAG="${TAG:-v27}"
+TAG="${TAG:-v28}"
 RAW="https://raw.githubusercontent.com/$REPO/$BRANCH"
 REL="https://github.com/$REPO/releases/download/$TAG"
 
 # Release assets (binaries built for the kernel in this release)
-KSMBD_SHA="ab4e2281c94fa83702c5569c20c208952d6f7a591fb9699a4cb157cdc93672ca"
+KSMBD_SHA="50cab73e0b412afefeaf013b21a12cdc163f7e4f41097cf7558556ab35f9133e"
 ARC4_SHA="e99a8f3671c9c38e6dfa678dc8fb4cd765e902488eb98d594c31999f6ca1d438"
 MD4_SHA="96adb3e3fdee262bb92fb0f159b8e9b00513dae733bde67e85924a9dab0db103"
 TOOLS_SHA="9b3d457ee8538f6f04ff72ef90dfe2f07bd9703fa7a5c955425a6f0b033a1460"
 # Scripts (from the branch)
-INITD_SHA="360551320fdf7c98888060790bdc1b781ab3f2f24c9548f297c0691e9f66b3fb"
+INITD_SHA="85628a1641d827a66d9412e9f24d0b47e4b16b7194ede04af9ce712b2d55c868"
 SETPW_SHA="ccbb240741584e508c305b3f00a23f2353210d6eac05f7b3009d0857c7de3f6a"
 
 KVER="6.1.141"

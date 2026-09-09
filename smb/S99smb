@@ -18,6 +18,7 @@ USERS=$DIR/ksmbdpwd.db
 PIDDIR=/var/run/smb-bonjour
 MOUNTD=$DIR/ksmbd.mountd
 CONTROL=$DIR/ksmbd.control
+VENDOR_MDNS_PID=/var/run/mDNSResponder-system.pid
 
 log() { echo "smb: $*" >> /var/log/smb.log; }
 
@@ -88,16 +89,73 @@ ${ip:+<p>Fallback by address: <a href="http://$ip/">http://$ip/</a> <small>(as o
 HTML
 }
 
+# The firmware runs a second mDNS daemon purely to publish <hostname>.local:
+#
+#     mDNSResponder -b -n <hostname> -P /var/run/mDNSResponder-system.pid
+#
+# That binary is Apple's mDNSResponderPosix, and its service type defaults to
+# _afpovertcp._tcp when -t is not given.  So every GL KVM advertises an AFP
+# server on port 548 that does not exist.  The Finder prefers AFP over SMB for
+# a host offering both, connects to 548, gets nothing, and reports "Connection
+# Failed" -- without ever trying port 445.  Nothing reaches ksmbd, which is why
+# its log stays empty while mount_smbfs and smbutil, which speak SMB directly,
+# work fine.
+#
+# So rather than registering _smb._tcp alongside it, restart that instance with
+# an explicit -t: <hostname>.local keeps resolving and the bogus AFP record is
+# replaced by the share we actually serve.
+
+find_vendor_mdns() {  # echoes "<pid> <name>" of a vendor instance lacking -t
+    for p in $(pgrep mDNSResponder 2>/dev/null); do
+        args=$(tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null)
+        case "$args" in
+            *" -t "*)  continue ;;
+            *" -n "*)  ;;
+            *)         continue ;;
+        esac
+        rest=${args#* -n }
+        echo "$p ${rest%% *}"
+        return 0
+    done
+    return 1
+}
+
 bonjour() {
-    # Make the Finder show the device under Network: _smb._tcp is what it
-    # browses for; _device-info gives it a name/icon hint.
-    command -v dns-sd >/dev/null 2>&1 || return
     mkdir -p "$PIDDIR"
     host=$(hostname)
+
+    if found=$(find_vendor_mdns); then
+        pid=${found%% *}
+        name=${found#* }
+        [ -n "$name" ] || name=$host
+        echo "$name" > "$PIDDIR/vendor-mdns-name"
+        kill "$pid" 2>/dev/null
+        sleep 1
+        rm -f "$VENDOR_MDNS_PID"
+        /usr/bin/mDNSResponder -b -n "$name" -t _smb._tcp -p 445 \
+            -P "$VENDOR_MDNS_PID" >/dev/null 2>&1
+        log "vendor mDNS re-registered as _smb._tcp (default would be AFP)"
+        return
+    fi
+
+    # No vendor instance to correct: announce the share ourselves.
+    command -v dns-sd >/dev/null 2>&1 || return
+    pgrep -f "dns-sd -R $host _smb" >/dev/null 2>&1 && return
     dns-sd -R "$host" _smb._tcp local 445 >/dev/null 2>&1 &
     echo $! > "$PIDDIR/smb.pid"
-    dns-sd -R "$host" _device-info._tcp local 0 model=RackMac >/dev/null 2>&1 &
-    echo $! > "$PIDDIR/devinfo.pid"
+}
+
+restore_vendor_mdns() {
+    [ -f "$PIDDIR/vendor-mdns-name" ] || return
+    name=$(cat "$PIDDIR/vendor-mdns-name")
+    for p in $(pgrep mDNSResponder 2>/dev/null); do
+        args=$(tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null)
+        case "$args" in *" -t _smb._tcp "*) kill "$p" 2>/dev/null ;; esac
+    done
+    sleep 1
+    rm -f "$VENDOR_MDNS_PID"
+    # Back to the firmware's own invocation, AFP default and all.
+    /usr/bin/mDNSResponder -b -n "$name" -P "$VENDOR_MDNS_PID" >/dev/null 2>&1
 }
 
 start() {
@@ -119,6 +177,7 @@ start() {
 }
 
 stop() {
+    restore_vendor_mdns
     for p in "$PIDDIR"/*.pid; do
         [ -f "$p" ] && kill "$(cat "$p")" 2>/dev/null
     done

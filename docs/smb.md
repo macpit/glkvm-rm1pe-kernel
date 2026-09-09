@@ -51,7 +51,11 @@ waf/Python build system and would weigh some 40 MB; ksmbd is a 300 kB
 kernel module plus three small userspace tools.
 
 * `ksmbd.ko`, `cifs_arc4.ko`, `cifs_md4.ko` are built from the kernel tree
-  in this repository with `CONFIG_SMB_SERVER=m` -- nothing else in the
+  in this repository with `CONFIG_SMB_SERVER=m`, plus
+  `patches/ksmbd-unknown-rpc-pipe.patch` (an unimplemented named pipe is
+  answered with `OBJECT_NAME_NOT_FOUND` rather than `INVALID_PARAMETER`, the
+  way Samba does it -- macOS asks for the Spotlight pipe `mdssvc` on every
+  connection) -- nothing else in the
   config changes, the kernel image is untouched.  Like `8188eu.ko` they are
   bound to the kernel version through `vermagic`; `install-smb.sh` and
   `S99smb` both check that before loading.  A new kernel version means
@@ -73,6 +77,49 @@ the reason explained in `install-discovery.sh`.
 The exFAT partition is mounted with `fmask=0022`, everything on it is owned
 by root.  The share therefore uses `force user = root`; the SMB user
 `admin` is only a name in ksmbd's own database and needs no system account.
+
+## The AFP record that has to go (macOS Finder)
+
+Every GL KVM runs a second mDNS daemon whose only job is to publish
+`<hostname>.local`:
+
+```
+mDNSResponder -b -n <hostname> -P /var/run/mDNSResponder-system.pid
+```
+
+That binary is Apple's `mDNSResponderPosix`, and its own usage text gives the
+game away:
+
+```
+-t uses 'type' as the service type (default is '_afpovertcp._tcp.')
+```
+
+With no `-t`, it advertises an **AFP server on port 548 that does not exist**.
+The Finder prefers AFP over SMB for a host offering both, connects to 548,
+gets nothing, and reports "Connection Failed" -- without ever trying port 445.
+Nothing reaches ksmbd, so its log stays empty during every failed attempt,
+while `mount_smbfs`, `smbutil` and `smbclient`, which speak SMB directly, work
+perfectly.  That combination is what makes this so confusing to debug: the
+server is healthy and the client is healthy, but the Finder never introduces
+them.
+
+`S99smb` therefore restarts that instance with an explicit
+`-t _smb._tcp -p 445`.  The hostname keeps resolving, the bogus AFP record is
+replaced by the share we actually serve, and `S99smb stop` puts the firmware's
+original invocation back.  The firmware starts it again with the AFP default
+on every boot, which is why this lives in `start` rather than in the installer.
+
+Do **not** advertise `_device-info._tcp` with a `model=` hint alongside: it
+makes the Finder classify the box as a Mac, which is another way to end up on
+the AFP path.
+
+To check from a Mac -- the KVMs must appear under `_smb._tcp` and *not* under
+`_afpovertcp._tcp`:
+
+```sh
+dns-sd -B _smb._tcp
+dns-sd -B _afpovertcp._tcp
+```
 
 ## Caveat: kvmd's virtual-drive mode
 

@@ -1,0 +1,59 @@
+From: glkvm-rm1pe-kernel
+Subject: ksmbd: answer an unknown RPC pipe with OBJECT_NAME_NOT_FOUND
+
+macOS opens the mdssvc (Spotlight) named pipe right after connecting. ksmbd
+returns STATUS_INVALID_PARAMETER for pipes it does not implement; Samba
+returns OBJECT_NAME_NOT_FOUND, which the Finder treats as "no server-side
+search here" and carries on. Not the cause of the Finder trouble this repo
+hit (that was the AFP advertisement, see docs/smb.md) but the friendlier and
+more correct answer.
+
+--- mgmt/user_session.c.orig	2026-09-09 12:36:50.651509644 +0000
++++ mgmt/user_session.c	2026-09-09 12:36:50.670511089 +0000
+@@ -84,7 +84,7 @@
+ 	if (!strcmp(rpc_name, "\\lsarpc") || !strcmp(rpc_name, "lsarpc"))
+ 		return KSMBD_RPC_LSARPC_METHOD_INVOKE;
+ 
+-	pr_err("Unsupported RPC: %s\n", rpc_name);
++	ksmbd_debug(SMB, "Unsupported RPC: %s\n", rpc_name);
+ 	return 0;
+ }
+ 
+@@ -96,7 +96,7 @@
+ 
+ 	method = __rpc_method(rpc_name);
+ 	if (!method)
+-		return -EINVAL;
++		return -ENOENT;
+ 
+ 	entry = kzalloc(sizeof(struct ksmbd_session_rpc), GFP_KERNEL);
+ 	if (!entry)
+--- smb2pdu.c.orig	2026-09-09 12:36:50.653694064 +0000
++++ smb2pdu.c	2026-09-09 12:36:50.672511241 +0000
+@@ -2285,7 +2285,10 @@
+ 
+ 	id = ksmbd_session_rpc_open(work->sess, name);
+ 	if (id < 0) {
+-		pr_err("Unable to open RPC pipe: %d\n", id);
++		if (id == -ENOENT)
++			ksmbd_debug(SMB, "No such RPC pipe: %s\n", name);
++		else
++			pr_err("Unable to open RPC pipe: %d\n", id);
+ 		err = id;
+ 		goto out;
+ 	}
+@@ -2317,6 +2320,14 @@
+ 
+ out:
+ 	switch (err) {
++	case -ENOENT:
++		/* An unknown named pipe. macOS asks for mdssvc (Spotlight) right
++		 * after connecting; Samba answers OBJECT_NAME_NOT_FOUND there and
++		 * the Finder carries on without server-side search, while
++		 * INVALID_PARAMETER makes it drop the connection and retry.
++		 */
++		rsp->hdr.Status = STATUS_OBJECT_NAME_NOT_FOUND;
++		break;
+ 	case -EINVAL:
+ 		rsp->hdr.Status = STATUS_INVALID_PARAMETER;
+ 		break;
