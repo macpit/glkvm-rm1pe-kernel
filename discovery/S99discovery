@@ -30,7 +30,12 @@ start_bonjour() {
     [ -f /etc/version ] && _model=$(grep RK_MODEL /etc/version | cut -d= -f2 | tr -d ' ')
     _name="$(hostname)"
     # TXT records: path for the browser, model for informational display
-    dns-sd -R "$_name" _http._tcp local 443 path=/ ${_model:+model=$_model} &
+    # setsid + /dev/null: a background dns-sd that inherits the caller's
+    # stdout keeps a pipe open forever -- install.sh runs this through
+    # 'sh install-discovery.sh | sed' and hung on a fresh device until the
+    # dns-sd was killed.
+    setsid dns-sd -R "$_name" _http._tcp local 443 path=/ ${_model:+model=$_model} \
+        >/dev/null 2>&1 < /dev/null &
     echo $! > "$BONJOUR_PIDFILE"
 }
 
