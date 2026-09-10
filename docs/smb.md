@@ -167,6 +167,10 @@ What to do on Windows:
 * connect as `admin` and tick "Remember my credentials", or store them once
   with `cmdkey /add:<hostname> /user:admin /pass:<password>` -- after that
   even the icon in the Network view opens the share directly, or
+* after the admin password is changed on the KVM, an Explorer that still
+  holds the old credentials in its session reports "You do not have
+  permission" instead of asking again; log off (or reboot) and it asks, or
+  `cmdkey /delete:<hostname>` first, or
 * on a test machine only, drop the signing requirement:
   `Set-SmbClientConfiguration -RequireSecuritySignature $false -Force`.
   This weakens every SMB connection of that machine, not just this one.
