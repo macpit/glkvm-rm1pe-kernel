@@ -16,8 +16,8 @@ If this saves you an evening, a star helps others find it.
 
 | Device | Model IDs | Board | eMMC | Stock firmware | Since |
 | --- | --- | --- | --- | --- | --- |
-| GL.iNet **GL-RM1PE** (Comet PoE) | `rm1pe` / `RM1PE` | Rockchip RV1126B-P | 64 GB | V1.9.1 release1 | v23 |
-| GL.iNet **GL-RM1 V2** (Comet) | `rm1v2` / `RM1V2` | Rockchip RV1126B-P | 8 GB | V1.9.1 release1 | v32 |
+| GL.iNet [**GL-RM1PE**](https://www.gl-inet.com/en-de/products/gl-rm1pe) (Comet PoE) | `rm1pe` / `RM1PE` | Rockchip RV1126B-P | 64 GB | V1.9.1 release1 | v23 |
+| GL.iNet [**GL-RM1 V2**](https://www.gl-inet.com/en-de/products/gl-rm1) (Comet) | `rm1v2` / `RM1V2` | Rockchip RV1126B-P | 8 GB | V1.9.1 release1 | v32 |
 
 Both share the vendor kernel 6.1.141, the device tree
 `Rockchip RV1126B-P EVB V14 Board`, the LT6911C HDMI bridge (chip firmware
