@@ -1,5 +1,60 @@
 # Building
 
+## Quick start
+
+You need a build machine with an aarch64 cross toolchain, `u-boot-tools` and
+`device-tree-compiler`, plus SSH access to the KVM. Full package list and setup:
+[docs/dev-machine.md](docs/dev-machine.md).
+
+The scripts in `scripts/` run on that build machine, not on the KVM: they call
+`mkimage` and `fdtget`, which the device does not have. They also assume
+key-based SSH, so run `ssh-copy-id root@<device>` first -- otherwise every step
+stops to ask for the dropbear password.
+
+```sh
+git clone https://github.com/gl-inet/kernel-6.1 kernel && cd kernel
+# 1. bring the tree to 6.1.141  -- see docs/build.md, this is required
+# 2. apply our patches
+for p in ../glkvm-rm1pe-kernel/patches/*.patch; do git apply "$p"; done
+# 3. build
+touch .scmversion
+make ARCH=arm64 O=../build rv1126bp_gl_rm1_poe_defconfig
+make ARCH=arm64 O=../build olddefconfig
+make ARCH=arm64 O=../build CROSS_COMPILE="aarch64-linux-gnu-" -j"$(nproc)" \
+     Image modules rockchip/rv1126bp-evb-v14.dtb
+```
+
+Then pack and install:
+
+```sh
+scripts/build-fit.sh 192.168.1.10 ../build/arch/arm64/boot/Image boot-custom.img
+scripts/install-kernel.sh 192.168.1.10 boot-custom.img
+# power-cycle the device yourself
+```
+
+`build-fit.sh` pulls the device tree and the Rockchip resource blob **from your
+own device** and packs them with your kernel. You always boot the DTB that
+matches your hardware, and nothing proprietary passes through this repository.
+
+To go back:
+
+```sh
+scripts/revert-kernel.sh 192.168.1.10            # lists the backups
+scripts/revert-kernel.sh 192.168.1.10 /userdata/kernel-backup/boot-backup-....img
+```
+
+`install-kernel.sh` backs up the running boot partition before it writes, so
+the way back exists from the first run onwards.
+
+`mkimage` stamps the FIT header with the build time, so two runs over the same
+inputs differ in three bytes. Set `SOURCE_DATE_EPOCH` to pin it and the output
+is reproducible byte for byte:
+
+```sh
+SOURCE_DATE_EPOCH=1788075901 scripts/build-fit.sh 192.168.1.10 ../build/arch/arm64/boot/Image out.img
+```
+
+
 > ## The one thing that can damage hardware
 >
 > **A kernel without the `version` sysfs attribute on the LT6911C reflashes the
