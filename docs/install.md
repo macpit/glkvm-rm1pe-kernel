@@ -3,7 +3,7 @@
 **Just run the kernel.** Everything happens in a shell on the KVM: no build
 machine, no toolchain, no SSH from anywhere else. Install and roll back are both
 covered in [docs/device-only.md](docs/device-only.md), and the short version is
-the [one-liner](#install-without-building) below.
+the [one-liner](#the-one-liner) below.
 
 **Change the kernel.** Then you need a build machine.
 [docs/dev-machine.md](docs/dev-machine.md) lists exactly what to install on a
