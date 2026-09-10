@@ -156,8 +156,8 @@ RK_VERSION=$(sed -n 's/^RK_VERSION=//p' /etc/version 2>/dev/null | head -1)
 wrong_device() {
     die "this does not look like a GL-RM1PE (Comet PoE), and $1.
 
-    /proc/gl-hw-info/model   ${GL_MODEL:-<missing>}     expected rm1pe
-    RK_MODEL in /etc/version ${RK_MODEL:-<missing>}     expected RM1PE
+    /proc/gl-hw-info/model   ${GL_MODEL:-<missing>}     expected rm1pe or rm1v2
+    RK_MODEL in /etc/version ${RK_MODEL:-<missing>}     expected RM1PE or RM1V2
     /proc/device-tree/model  ${DT_MODEL:-<missing>}     expected to contain RV1126B-P
 
 Everything in this repository is built for the RM1PE only. A kernel for the
@@ -168,8 +168,12 @@ If you believe this IS an RM1PE, please open an issue with the three lines
 above: $ISSUES"
 }
 
-[ "$GL_MODEL" = "rm1pe" ] || wrong_device "the model does not match"
-[ "$RK_MODEL" = "RM1PE" ] || wrong_device "the vendor version file disagrees"
+# RM1PE (Comet PoE) and RM1V2 (Comet, no PoE) are the same board: RV1126B-P,
+# the same vendor kernel 6.1.141, the same device tree compatible, the same
+# LT6911 bridge and partition layout.  The V2 differs in the eMMC size
+# (8 GB, so a smaller media share) and its own DTB, which patch-fit.py keeps.
+case "$GL_MODEL" in rm1pe|rm1v2) ;; *) wrong_device "the model does not match" ;; esac
+case "$RK_MODEL" in RM1PE|RM1V2) ;; *) wrong_device "the vendor version file disagrees" ;; esac
 case "$DT_MODEL" in *RV1126B-P*) ;; *) wrong_device "the device tree disagrees" ;; esac
 
 # Only refuse on firmware we have not seen. The list is short on purpose.
@@ -511,7 +515,7 @@ say "==> checking the device"
 command -v python3 >/dev/null || die "python3 not found"
 is_fit "$BOOT" || die "the boot partition does not start with the FIT magic.
 This is not a layout we know how to patch. Please open an issue at $ISSUES"
-say "    RM1PE, stock firmware $RK_VERSION, boot partition $PART_BYTES bytes"
+say "    $RK_MODEL, stock firmware $RK_VERSION, boot partition $PART_BYTES bytes"
 
 FREE_KB=$(df -P /userdata | awk 'NR==2 {print $4}')
 [ "$FREE_KB" -ge "$NEED_KB" ] || die "only ${FREE_KB} kB free on /userdata, need ${NEED_KB} kB"

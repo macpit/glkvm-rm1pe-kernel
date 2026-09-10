@@ -58,6 +58,11 @@ verify.
 
 ## Tested with
 
+Also on a GL-RM1 V2 (the non-PoE Comet, `RK_MODEL=RM1V2`): same RV1126B-P,
+same vendor kernel 6.1.141, same device tree and LT6911 bridge, 8 GB eMMC
+instead of 64 GB.  install.sh accepts both models since v32.
+
+
 | | |
 | --- | --- |
 | Device | GL.iNet **GL-RM1PE** (Comet PoE), `/proc/gl-hw-info/model` = `rm1pe` |
